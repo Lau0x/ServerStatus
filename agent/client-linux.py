@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # coding: utf-8
 # Create by : https://github.com/cppla/ServerStatus
-# 版本：1.0.2, 支持Python版本：2.7 to 3.9
-# 支持操作系统： Linux, OSX, FreeBSD, OpenBSD and NetBSD, both 32-bit and 64-bit architectures
+# 版本：1.0.2, 需要 Python 3
+# 支持操作系统：使用 /proc 的 Linux 发行版
 # 说明: 默认情况下修改server和user就可以了。丢包率监测方向可以自定义，例如：CU = "www.facebook.com"。
 #
 # 20211117: 移除tupd信息 (Update by: https://github.com/lidalao/ServerStatus)
@@ -266,16 +266,22 @@ def byte_str(object):
         print(type(object))
 
 if __name__ == '__main__':
-    for argc in sys.argv:
-        if 'SERVER' in argc:
+    SERVER = os.getenv('SSS_SERVER', SERVER)
+    USER = os.getenv('SSS_USER', USER)
+    PASSWORD = os.getenv('SSS_PASSWORD', PASSWORD)
+    PORT = int(os.getenv('SSS_PORT', PORT))
+    INTERVAL = int(os.getenv('SSS_INTERVAL', INTERVAL))
+
+    for argc in sys.argv[1:]:
+        if argc.startswith('SERVER='):
             SERVER = argc.split('SERVER=')[-1]
-        elif 'PORT' in argc:
+        elif argc.startswith('PORT='):
             PORT = int(argc.split('PORT=')[-1])
-        elif 'USER' in argc:
+        elif argc.startswith('USER='):
             USER = argc.split('USER=')[-1]
-        elif 'PASSWORD' in argc:
+        elif argc.startswith('PASSWORD='):
             PASSWORD = argc.split('PASSWORD=')[-1]
-        elif 'INTERVAL' in argc:
+        elif argc.startswith('INTERVAL='):
             INTERVAL = int(argc.split('INTERVAL=')[-1])
     socket.setdefaulttimeout(30)
     get_realtime_date()
@@ -285,7 +291,7 @@ if __name__ == '__main__':
             s = socket.create_connection((SERVER, PORT))
             data = byte_str(s.recv(1024))
             if data.find("Authentication required") > -1:
-                s.send(byte_str(USER + ':' + PASSWORD + '\n'))
+                s.sendall(byte_str(USER + ':' + PASSWORD + '\n'))
                 data = byte_str(s.recv(1024))
                 if data.find("Authentication successful") < 0:
                     print(data)
@@ -349,7 +355,7 @@ if __name__ == '__main__':
                 array['time_10086'] = pingTime.get('10086')
                 array['tcp'], array['udp'], array['process'], array['thread'] = tupd()
 
-                s.send(byte_str("update " + json.dumps(array) + "\n"))
+                s.sendall(byte_str("update " + json.dumps(array) + "\n"))
         except KeyboardInterrupt:
             raise
         except socket.error:
