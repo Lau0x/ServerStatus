@@ -22,7 +22,7 @@ agent/{client-linux.py,sss-agent.sh,sss-agent.service}  # 被监控机器侧
 Three roles communicate through the upstream ServerStatus server, run unmodified as the `cppla/serverstatus:latest` Docker image:
 
 - **Server side (panel host)** — `docker-compose.yml` (project `name: sss`) runs three services, auto-named `sss-srv-1` / `sss-web-1` / `sss-bot-1` (no `container_name`): **`srv`** (upstream `cppla/serverstatus`, TCP report port `35601`) receives agent uploads and writes `json/stats.json`; **`web`** (nginx, frontend baked into the image via `service/web/Dockerfile`) serves the dashboard on `8081` and reads the shared `./json` mounted read-only at the `json/` subpath; **`bot`** (built from `service/bot/`) sends Telegram notifications. `config.json` (`{"servers":[...]}`) is bind-mounted into `srv` and is the single source of truth for which nodes exist. `srv` and `web` share the host `./json` directory — srv writes, web reads.
-- **Node management** — implemented **directly in `sss.sh`** (bash + `jq`); there is no `_sss.py` anymore. The menu (`menu_loop`) does view/add/remove/update against `config.json` via `jq` (atomic temp-file + `mv` writes, `sort_by(.name)`), then `docker-compose restart` to reload. Each added node gets a random `username` (`/proc/sys/kernel/random/uuid`) + `password` (`/dev/urandom`, ≥1 digit/lower/upper); `print_agent_cmd` prints the exact `agent/sss-agent.sh` install command.
+- **Node management** — implemented **directly in `sss.sh`** (bash + `jq`); there is no `_sss.py` anymore. The menu (`menu_loop`) does view/add/remove/update against `config.json` via `jq` (backup + atomic temp-file + `mv` writes, `sort_by(.name)`), then restarts the Compose stack. Each added node gets a random `username` (`/proc/sys/kernel/random/uuid`) and a 192-bit hex `password` from `/dev/urandom`; `print_agent_cmd` prints an install command that prompts for the password instead of placing it in process arguments.
 - **Agent side (monitored machines)** — `agent/client-linux.py` (upstream cppla collector, only modification: `tupd()` stubbed to return zeros) connects to the panel's `35601` and authenticates with the node's USER/PASSWORD, streaming metrics. Installed as a systemd service via `agent/sss-agent.sh`.
 
 `service/bot/bot.py` polls `http://srv/json/stats.json` (the `srv` service hostname on the compose network — auto-named container `sss-srv-1`) every 3s and sends Telegram messages on state changes. **Debounce:** a node must report the same state for 10 consecutive polls (`counterOn`/`counterOff`) before a message fires — suppresses flapping. State is in-memory only.
@@ -32,20 +32,24 @@ Vanilla HTML/CSS/JS (no JS bundler); packaged into the `web` nginx image via `se
 
 ## Config / credential flow
 
-No app-level config is checked in. Values are injected by the shell installers via `sed` placeholder replacement:
+No app-level config is checked in. Values are written by the shell installers to ignored, permission-restricted files:
 
-- `sss.sh` replaces `tg_chat_id` / `tg_bot_token` in `docker-compose.yml` (bot reads them as `TG_CHAT_ID` / `TG_BOT_TOKEN`).
-- `agent/sss-agent.sh` downloads `client-linux.py` to `/opt/sss/agent/` and replaces `sss_host` / `sss_user` / `sss_pass` in `sss-agent.service` before enabling it.
+- `sss.sh --telegram` prompts for Telegram values and writes `.env` with mode `0600`; the bot reads `TG_CHAT_ID` / `TG_BOT_TOKEN` from its environment and is activated through the `telegram` Compose profile.
+- `agent/sss-agent.sh install <host> <user>` prompts for the password, downloads `client-linux.py` to `/opt/sss/agent/`, and writes `/etc/sss-agent.env` with mode `0600`. The systemd unit contains no credentials in `ExecStart`.
 
-Both scripts `wget` files from `GITHUB_RAW_URL` (`raw.githubusercontent.com/lidalao/ServerStatus/master`) **at runtime**, so the repo's `master` branch is the release channel — local edits only take effect once pushed there. **Paths matter:** `sss.sh` fetches `service/bot/*` and `service/web/*`; `agent/sss-agent.sh` fetches `agent/client-linux.py` and `agent/sss-agent.service`. Moving any of these requires updating the matching raw URLs.
+Both scripts download files from `GITHUB_RAW_URL` (`raw.githubusercontent.com/Lau0x/ServerStatus/master` by default, overridable with `SSS_RAW_BASE`) **at runtime**, so the fork's `master` branch is the release channel — local edits only take effect once pushed there. Downloads require valid TLS, fail on HTTP errors, retry transient failures, and install through temporary files. **Paths matter:** `sss.sh` fetches `service/bot/*` and `service/web/*`; `agent/sss-agent.sh` fetches `agent/client-linux.py` and `agent/sss-agent.service`. Moving any of these requires updating the matching raw URLs.
 
 ## Running / testing
 
 No build system, lint, or test suite. Host needs **`jq`** (and docker/docker-compose); **no python on the host** — `bot.py` runs in its container, `client-linux.py` runs on agents.
 
 ```bash
-# 服务端首次安装(带 TG 参数): 装 docker/jq, 拉 service/*, 起栈, 进节点管理菜单
-sudo ./sss.sh <TG_CHAT_ID> <TG_BOT_TOKEN>
+# 服务端首次安装: 装 docker/jq, 拉 service/*, 起栈, 进节点管理菜单
+sudo ./sss.sh
+# 交互配置 Telegram，避免 token 进入 shell history
+sudo ./sss.sh --telegram
+# 覆盖静态服务文件并重建，保留配置和数据
+sudo ./sss.sh --upgrade
 # 之后再次运行(栈已起): 直接进节点管理菜单
 sudo ./sss.sh
 
@@ -58,7 +62,7 @@ echo '{"updated":'$(date +%s)',"servers":[]}' > /tmp/prev/json/stats.json
 (cd /tmp/prev && python3 -m http.server 8099)   # 打开 http://localhost:8099
 
 # Agent 端手动运行采集器(平时由 systemd 跑)
-python3 agent/client-linux.py SERVER=<panel_ip> USER=<node_user> PASSWORD=<node_pass>
+SSS_SERVER=<panel_ip> SSS_USER=<node_user> SSS_PASSWORD=<node_pass> python3 agent/client-linux.py
 ```
 
-`service/bot/bot.py` depends on `requests` (in-container); `agent/client-linux.py` is stdlib-only (Python 2.7–3.9).
+`service/bot/bot.py` and `agent/client-linux.py` are stdlib-only. The shipped systemd installer requires Python 3.

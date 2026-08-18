@@ -9,7 +9,12 @@ services:
       - ./config.json:/ServerStatus/server/config.json
       - ./json:/usr/share/nginx/html/json
     ports:
-      - 35601:35601
+      - "${SSS_REPORT_BIND:-0.0.0.0}:${SSS_REPORT_PORT:-35601}:35601"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # 前端面板: 静态资源打包进镜像, 运行时读取共享的 json/stats.json
   web:
@@ -19,17 +24,36 @@ services:
     volumes:
       - ./json:/usr/share/nginx/html/json:ro
     ports:
-      - 8081:80
+      - "${SSS_WEB_BIND:-0.0.0.0}:${SSS_WEB_PORT:-8081}:80"
     depends_on:
       - srv
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Telegram 上下线通知
   bot:
+    profiles:
+      - telegram
     build:
       context: ./service/bot
     restart: unless-stopped
     depends_on:
       - srv
     environment:
-      - TG_CHAT_ID=tg_chat_id
-      - TG_BOT_TOKEN=tg_bot_token
+      TG_CHAT_ID: ${TG_CHAT_ID:-}
+      TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
+      DEBOUNCE_POLLS: ${DEBOUNCE_POLLS:-10}
+      POLL_INTERVAL: ${POLL_INTERVAL:-3}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

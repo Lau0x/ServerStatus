@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check shell syntax
+        run: bash -n sss.sh agent/sss-agent.sh
+
+      - name: Check Python and bot behavior
+        run: |
+          python3 -m compileall -q agent service/bot
+          python3 -m unittest discover -s tests -v
+
+      - name: Check JavaScript syntax
+        run: node --check service/web/js/app.js
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build local images
+        run: docker compose --profile telegram build
