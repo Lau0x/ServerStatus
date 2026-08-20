@@ -24,7 +24,7 @@ services:
 
   # 前端面板: 静态资源打包进镜像, 运行时读取共享的 json/stats.json
   web:
-    image: "${SSS_WEB_IMAGE:-ghcr.io/lau0x/serverstatus-web@sha256:26806c1b66ea30fcb409cf27eb388c27220c7b2b405429b0df0543be0ce12bc3}"
+    image: "${SSS_WEB_IMAGE:-ghcr.io/lau0x/serverstatus-web@sha256:ebc3b942e0b8830db5f681cef60a73cf197ec2b4e1422dd42d8d71747d290ee0}"
     restart: unless-stopped
     volumes:
       - ./json:/usr/share/nginx/html/json:ro
@@ -48,7 +48,7 @@ services:
   bot:
     profiles:
       - telegram
-    image: "${SSS_BOT_IMAGE:-ghcr.io/lau0x/serverstatus-bot@sha256:1b67a3ab7222d321275d8372286c94589a60a85b13d3e655d579b2c738bcfc1c}"
+    image: "${SSS_BOT_IMAGE:-ghcr.io/lau0x/serverstatus-bot@sha256:5602c74a1907e0ba464521f78b2df0dfafc885e619d591fd2734eb18aef17498}"
     restart: unless-stopped
     depends_on:
       - srv
@@ -69,6 +69,12 @@ services:
       - /tmp
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; p=os.environ['HEARTBEAT_FILE']; assert os.path.isfile(p) and time.time()-os.path.getmtime(p) <= float(os.environ['HEARTBEAT_STALE_AFTER'])"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
     logging:
       driver: json-file
       options:

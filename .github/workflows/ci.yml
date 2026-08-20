@@ -63,8 +63,6 @@ jobs:
           printf '%s\n' '{"servers":[]}' > "${smoke_dir}/config.json"
           printf '%s\n' '{"servers":[],"sslcerts":[]}' > "${smoke_dir}/json/stats.json"
 
-          export SSS_WEB_IMAGE=serverstatus-ci-web:local
-          export SSS_BOT_IMAGE=serverstatus-ci-bot:local
           export SSS_WEB_BIND=127.0.0.1
           export SSS_WEB_PORT=18081
           export SSS_REPORT_BIND=127.0.0.1
@@ -83,11 +81,22 @@ jobs:
           }
           trap cleanup EXIT
 
+          check_stack() {
+            docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" exec -T srv wget -q -O /dev/null http://127.0.0.1/api/health
+            docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" ps --status running --services | grep -qx bot
+            docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" exec -T bot \
+              python -c "import os,time; p='/tmp/serverstatus-bot-heartbeat'; deadline=time.time()+30; exec('while not os.path.isfile(p) and time.time() < deadline:\n time.sleep(1)'); assert os.path.isfile(p) and time.time()-os.path.getmtime(p) <= 45"
+            curl --fail --silent --show-error --output /dev/null http://127.0.0.1:18081/
+            curl --fail --silent --show-error http://127.0.0.1:18081/json/stats.json |
+              python3 -c 'import json, sys; assert json.load(sys.stdin).get("servers") == []'
+          }
+
+          unset SSS_SRV_IMAGE SSS_WEB_IMAGE SSS_BOT_IMAGE
           docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" up -d --wait --wait-timeout 90
-          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" exec -T srv wget -q -O /dev/null http://127.0.0.1/api/health
-          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" ps --status running --services | grep -qx bot
-          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" exec -T bot \
-            python -c "import os,time; p='/tmp/serverstatus-bot-heartbeat'; deadline=time.time()+30; exec('while not os.path.isfile(p) and time.time() < deadline:\n time.sleep(1)'); assert os.path.isfile(p) and time.time()-os.path.getmtime(p) <= 45"
-          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:18081/
-          curl --fail --silent --show-error http://127.0.0.1:18081/json/stats.json |
-            python3 -c 'import json, sys; assert json.load(sys.stdin).get("servers") == []'
+          check_stack
+          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" down --remove-orphans
+
+          export SSS_WEB_IMAGE=serverstatus-ci-web:local
+          export SSS_BOT_IMAGE=serverstatus-ci-bot:local
+          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" up -d --wait --wait-timeout 90
+          check_stack
