@@ -3,13 +3,19 @@ name: sss
 services:
   # ServerStatus server: 接收 agent 上报(35601), 生成 json/stats.json
   srv:
-    image: cppla/serverstatus:latest
+    image: "${SSS_SRV_IMAGE:-cppla/serverstatus@sha256:14e13d4d7f0f0cbaacc2dc58476ec85a67e7433a91329b33bfefda4bab5924e0}"
     restart: unless-stopped
     volumes:
-      - ./config.json:/ServerStatus/server/config.json
-      - ./json:/usr/share/nginx/html/json
+      - ./config.json:/app/config/config.json
+      - ./json:/app/data
     ports:
       - "${SSS_REPORT_BIND:-0.0.0.0}:${SSS_REPORT_PORT:-35601}:35601"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -18,8 +24,7 @@ services:
 
   # 前端面板: 静态资源打包进镜像, 运行时读取共享的 json/stats.json
   web:
-    build:
-      context: ./service/web
+    image: "${SSS_WEB_IMAGE:-ghcr.io/lau0x/serverstatus-web@sha256:26806c1b66ea30fcb409cf27eb388c27220c7b2b405429b0df0543be0ce12bc3}"
     restart: unless-stopped
     volumes:
       - ./json:/usr/share/nginx/html/json:ro
@@ -27,6 +32,12 @@ services:
       - "${SSS_WEB_BIND:-0.0.0.0}:${SSS_WEB_PORT:-8081}:80"
     depends_on:
       - srv
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ && wget -q -O /dev/null http://127.0.0.1/json/stats.json"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -37,8 +48,7 @@ services:
   bot:
     profiles:
       - telegram
-    build:
-      context: ./service/bot
+    image: "${SSS_BOT_IMAGE:-ghcr.io/lau0x/serverstatus-bot@sha256:1b67a3ab7222d321275d8372286c94589a60a85b13d3e655d579b2c738bcfc1c}"
     restart: unless-stopped
     depends_on:
       - srv
@@ -47,6 +57,13 @@ services:
       TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
       DEBOUNCE_POLLS: ${DEBOUNCE_POLLS:-10}
       POLL_INTERVAL: ${POLL_INTERVAL:-3}
+      FEED_FAILURE_THRESHOLD: ${FEED_FAILURE_THRESHOLD:-3}
+      FEED_LOG_INTERVAL: ${FEED_LOG_INTERVAL:-60}
+      FEED_MAX_BACKOFF: ${FEED_MAX_BACKOFF:-30}
+      NOTIFY_RETRY_BASE: ${NOTIFY_RETRY_BASE:-30}
+      NOTIFY_RETRY_MAX: ${NOTIFY_RETRY_MAX:-300}
+      HEARTBEAT_FILE: /tmp/serverstatus-bot-heartbeat
+      HEARTBEAT_STALE_AFTER: ${HEARTBEAT_STALE_AFTER:-45}
     read_only: true
     tmpfs:
       - /tmp

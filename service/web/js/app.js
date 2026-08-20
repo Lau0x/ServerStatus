@@ -3,10 +3,15 @@
   'use strict';
 
   var S = { servers: [], expanded: {} };
+  var POLL_INTERVAL_MS = 1500;
+  var FETCH_TIMEOUT_MS = 10000;
+  var STALE_AFTER_MS = 30000;
 
   /* ----------------- theme: light / dark / system ----------------- */
   var THEME_KEY = 'theme';
-  var mql = window.matchMedia('(prefers-color-scheme: dark)');
+  var mql = typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : { matches: false };
 
   function effective(t) { return t === 'system' ? (mql.matches ? 'dark' : 'light') : t; }
   function getTheme() { return localStorage.getItem(THEME_KEY) || 'system'; }
@@ -67,6 +72,132 @@
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
+  }
+
+  /* ----------------- status feed ----------------- */
+  function updatedMillis(value) {
+    var n = Number(value);
+    if (!isFinite(n) || n <= 0) return null;
+    return n < 1000000000000 ? n * 1000 : n;
+  }
+
+  function updateFeedState(state, result, now) {
+    if (result.ok) {
+      return {
+        data: result.data,
+        lastSuccess: now,
+        sourceUpdated: updatedMillis(result.data && result.data.updated),
+        error: null
+      };
+    }
+    return {
+      data: state.data,
+      lastSuccess: state.lastSuccess,
+      sourceUpdated: state.sourceUpdated,
+      error: result.error || new Error('stats unavailable')
+    };
+  }
+
+  function ageText(ms) {
+    var seconds = Math.max(0, Math.floor(ms / 1000));
+    if (seconds < 60) return seconds + 's ago';
+    var minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + 'm ago';
+    return Math.floor(minutes / 60) + 'h ago';
+  }
+
+  function feedNotice(state, now, staleAfter) {
+    if (state.error) {
+      var lastDataTime = state.sourceUpdated == null ? state.lastSuccess : state.sourceUpdated;
+      return {
+        kind: 'error',
+        text: lastDataTime == null
+          ? 'Data unavailable'
+          : 'Data unavailable · using data from ' + ageText(now - lastDataTime)
+      };
+    }
+    if (state.sourceUpdated != null && now - state.sourceUpdated > staleAfter) {
+      return { kind: 'stale', text: 'Stale data · ' + ageText(now - state.sourceUpdated) };
+    }
+    var updated = state.sourceUpdated == null ? state.lastSuccess : state.sourceUpdated;
+    return {
+      kind: 'ok',
+      text: updated == null ? 'Loading…' : 'Updated ' + new Date(updated).toLocaleTimeString()
+    };
+  }
+
+  function fetchStats(fetchFn, now, timeoutMs, AbortControllerImpl) {
+    timeoutMs = timeoutMs == null ? FETCH_TIMEOUT_MS : timeoutMs;
+    var Controller = AbortControllerImpl === undefined
+      ? (typeof AbortController === 'undefined' ? null : AbortController)
+      : AbortControllerImpl;
+    var controller = Controller ? new Controller() : null;
+    var requestOptions = { cache: 'no-store' };
+    if (controller) requestOptions.signal = controller.signal;
+    var timer;
+    var timeout = new Promise(function (resolve, reject) {
+      timer = setTimeout(function () {
+        if (controller) controller.abort();
+        reject(new Error('stats request timed out'));
+      }, timeoutMs);
+    });
+    var request;
+    try {
+      request = Promise.resolve(fetchFn('json/stats.json?_=' + now, requestOptions));
+    } catch (error) {
+      request = Promise.reject(error);
+    }
+    request = request
+      .then(function (response) {
+        if (!response.ok) throw new Error('stats HTTP ' + response.status);
+        return response.json();
+      })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.servers)) throw new Error('stats missing servers');
+        return data;
+      });
+    return Promise.race([request, timeout])
+      .finally(function () { clearTimeout(timer); });
+  }
+
+  function createStatusPoller(options) {
+    var state = { data: null, lastSuccess: null, sourceUpdated: null, error: null };
+    var inFlight = null;
+    var timer = null;
+    var stopped = false;
+    var fetchFn = options.fetch;
+    var nowFn = options.now || Date.now;
+    var schedule = options.schedule || setTimeout;
+    var cancel = options.cancel || clearTimeout;
+
+    function run() {
+      if (inFlight) return inFlight;
+      var startedAt = nowFn();
+      inFlight = fetchStats(fetchFn, startedAt, options.timeout)
+        .then(function (data) {
+          state = updateFeedState(state, { ok: true, data: data }, nowFn());
+          options.onData(data);
+        })
+        .catch(function (error) {
+          state = updateFeedState(state, { ok: false, error: error }, nowFn());
+        })
+        .finally(function () {
+          options.onState(state);
+          inFlight = null;
+          if (!stopped) timer = schedule(run, options.interval);
+        });
+      return inFlight;
+    }
+
+    return {
+      start: function () { stopped = false; return run(); },
+      run: run,
+      stop: function () {
+        stopped = true;
+        if (timer != null) cancel(timer);
+      },
+      getState: function () { return state; }
+    };
   }
 
   /* ----------------- cell builders ----------------- */
@@ -242,20 +373,8 @@
     document.getElementById('summary').innerHTML =
       '<b>' + on + '</b> online / <b>' + servers.length + '</b> total';
 
-    if (j && j.updated) {
-      var d = new Date(j.updated * 1000);
-      document.getElementById('updated').textContent = 'Updated ' + d.toLocaleTimeString();
-    }
-
     applyExpanded();
     requestAnimationFrame(flushNewBars);
-  }
-
-  function tick() {
-    fetch('json/stats.json?_=' + Date.now(), { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(render)
-      .catch(function () { /* keep last view on transient errors */ });
   }
 
   /* ----------------- expandable detail row (老站手风琴式: 点击行就地展开) ----------------- */
@@ -309,8 +428,30 @@
   }
 
   /* ----------------- boot ----------------- */
-  initTheme();
-  initExpand();
-  tick();
-  setInterval(tick, 1500);
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      updatedMillis: updatedMillis,
+      updateFeedState: updateFeedState,
+      feedNotice: feedNotice,
+      fetchStats: fetchStats,
+      createStatusPoller: createStatusPoller
+    };
+  }
+
+  if (typeof document !== 'undefined') {
+    initTheme();
+    initExpand();
+    createStatusPoller({
+      fetch: fetch.bind(window),
+      interval: POLL_INTERVAL_MS,
+      timeout: FETCH_TIMEOUT_MS,
+      onData: render,
+      onState: function (state) {
+        var notice = feedNotice(state, Date.now(), STALE_AFTER_MS);
+        var updated = document.getElementById('updated');
+        updated.className = 'updated ' + notice.kind;
+        updated.textContent = notice.text;
+      }
+    }).start();
+  }
 })();

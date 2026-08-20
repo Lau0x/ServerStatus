@@ -134,6 +134,13 @@ def get_network(ip_version):
     except:
         return False
 
+def update_network_status(array, check_ip, timer, interval):
+    timer -= interval
+    if timer <= 0:
+        array['online' + str(check_ip)] = get_network(check_ip)
+        return 10
+    return timer
+
 lostRate = {
     '10010': 0.0,
     '189': 0.0,
@@ -283,6 +290,9 @@ if __name__ == '__main__':
             PASSWORD = argc.split('PASSWORD=')[-1]
         elif argc.startswith('INTERVAL='):
             INTERVAL = int(argc.split('INTERVAL=')[-1])
+    if INTERVAL <= 0:
+        print("SSS_INTERVAL must be greater than 0", file=sys.stderr)
+        sys.exit(2)
     socket.setdefaulttimeout(30)
     get_realtime_date()
     while True:
@@ -324,11 +334,7 @@ if __name__ == '__main__':
                 HDDTotal, HDDUsed = get_hdd()
 
                 array = {}
-                if not timer:
-                    array['online' + str(check_ip)] = get_network(check_ip)
-                    timer = 10
-                else:
-                    timer -= 1*INTERVAL
+                timer = update_network_status(array, check_ip, timer, INTERVAL)
 
                 array['uptime'] = Uptime
                 array['load_1'] = Load_1

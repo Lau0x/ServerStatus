@@ -13,6 +13,14 @@ GITHUB_RAW_URL="${SSS_RAW_BASE:-https://raw.githubusercontent.com/Lau0x/ServerSt
 CONFIG_FILE="config.json"
 COMPOSE_CMD=()
 FORCE_INSTALL=0
+CONFIGURE_BOT_STAGE=""
+INSTALL_STAGE=""
+INSTALL_HAD_PREVIOUS_COMPOSE=0
+INSTALL_HAD_PREVIOUS_ENV=0
+INSTALL_ENV_MAY_BE_REPLACED=0
+INSTALL_COMPOSE_MAY_BE_REPLACED=0
+INSTALL_STACK_TOUCHED=0
+INSTALL_COMMITTED=0
 
 # ---- 颜色(真实 ESC 字符, printf/echo 通用) ----
 red=$'\e[0;31m'
@@ -51,13 +59,42 @@ download_file() {
     local url="$1" destination="$2"
     if ! curl --fail --show-error --silent --location \
         --retry 3 --connect-timeout 10 --output "$destination" "$url"; then
-        die "文件下载失败：${url}"
+        err "文件下载失败：${url}"
+        return 1
     fi
-    [ -s "$destination" ] || die "下载文件为空：${url}"
+    if [ ! -s "$destination" ]; then
+        err "下载文件为空：${url}"
+        return 1
+    fi
 }
 
 compose() {
     "${COMPOSE_CMD[@]}" "$@"
+}
+
+compose_file() {
+    local file="$1" env_file="$2"
+    shift 2
+    if [ -f "$env_file" ]; then
+        "${COMPOSE_CMD[@]}" --project-directory "$PWD" --env-file "$env_file" -f "$file" "$@"
+    else
+        "${COMPOSE_CMD[@]}" --project-directory "$PWD" -f "$file" "$@"
+    fi
+}
+
+atomic_replace() {
+    local source="$1" destination="$2" mode="$3" destination_dir destination_name temporary
+    destination_dir=$(dirname -- "$destination")
+    destination_name=$(basename -- "$destination")
+    temporary=$(mktemp "${destination_dir}/.${destination_name}.tmp.XXXXXX") || return 1
+    if ! install -m "$mode" "$source" "$temporary"; then
+        rm -f -- "$temporary"
+        return 1
+    fi
+    if ! mv -f -- "$temporary" "$destination"; then
+        rm -f -- "$temporary"
+        return 1
+    fi
 }
 
 pre_check() {
@@ -89,15 +126,14 @@ install_base() {
 }
 
 detect_compose() {
-    if docker compose version >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker compose)
-        return 0
-    fi
-    if command -v docker-compose >/dev/null 2>&1; then
-        COMPOSE_CMD=(docker-compose)
-        return 0
-    fi
-    return 1
+    local up_help ps_help
+    docker compose version >/dev/null 2>&1 || return 1
+    up_help=$(docker compose up --help 2>/dev/null) || return 1
+    ps_help=$(docker compose ps --help 2>/dev/null) || return 1
+    [[ "$up_help" =~ (^|[[:space:]])--wait([=[:space:]]|$) ]] || return 1
+    [[ "$up_help" =~ (^|[[:space:]])--wait-timeout([=[:space:]]|$) ]] || return 1
+    [[ "$ps_help" =~ (^|[[:space:]])--status([=[:space:]]|$) ]] || return 1
+    COMPOSE_CMD=(docker compose)
 }
 
 install_docker() {
@@ -106,7 +142,7 @@ install_docker() {
         local installer
         info "正在安装 Docker"
         installer=$(mktemp)
-        download_file "https://get.docker.com" "$installer"
+        download_file "https://get.docker.com" "$installer" || { rm -f "$installer"; die "Docker 安装脚本下载失败"; }
         sh "$installer" || { rm -f "$installer"; die "Docker 安装失败"; }
         rm -f "$installer"
         systemctl enable docker.service
@@ -115,84 +151,328 @@ install_docker() {
     fi
 
     if ! detect_compose; then
-        info "正在安装 Docker Compose 插件"
-        install_soft docker-compose-plugin || die "Docker Compose 安装失败，请先安装 docker compose 插件"
-        detect_compose || die "未找到可用的 Docker Compose"
+        info "正在安装或升级 Docker Compose v2 插件（需支持 up --wait/--wait-timeout 与 ps --status）"
+        install_soft docker-compose-plugin || die "Docker Compose v2 安装失败，请安装支持 up --wait/--wait-timeout 与 ps --status 的 docker compose 插件"
+        detect_compose || die "Docker Compose v2 能力不足：需要 docker compose up --wait/--wait-timeout 和 docker compose ps --status"
     fi
 }
 
-configure_bot() {
-    local chat_id token stage
-    if [[ $# -eq 0 ]]; then
+cleanup_configure_bot_stage() {
+    local stage="$CONFIGURE_BOT_STAGE"
+    if [[ -z "$stage" ]]; then
         return 0
+    fi
+    if rm -rf -- "$stage"; then
+        CONFIGURE_BOT_STAGE=""
+        return 0
+    fi
+    chmod 0700 "$stage" 2>/dev/null || true
+    return 1
+}
+
+reset_install_transaction() {
+    trap - HUP INT TERM
+    INSTALL_STAGE=""
+    INSTALL_HAD_PREVIOUS_COMPOSE=0
+    INSTALL_HAD_PREVIOUS_ENV=0
+    INSTALL_ENV_MAY_BE_REPLACED=0
+    INSTALL_COMPOSE_MAY_BE_REPLACED=0
+    INSTALL_STACK_TOUCHED=0
+    INSTALL_COMMITTED=0
+}
+
+abort_install() {
+    local stage="$1" message="$2" configure_stage="$CONFIGURE_BOT_STAGE" retained=""
+    if ! cleanup_configure_bot_stage; then
+        err "Telegram 临时目录清理失败，路径保留在 ${configure_stage}"
+        retained="$configure_stage"
+    fi
+    if ! rm -rf -- "$stage"; then
+        chmod 0700 "$stage" 2>/dev/null || true
+        retained="$stage"
+    fi
+    if [[ -n "$retained" ]]; then
+        die "${message}；暂存清理失败，路径保留在 ${retained}"
+    fi
+    die "$message"
+}
+
+retain_install_stage() {
+    local stage="$1" message="$2" configure_stage="$CONFIGURE_BOT_STAGE"
+    if ! cleanup_configure_bot_stage; then
+        err "Telegram 临时目录清理失败，路径保留在 ${configure_stage}"
+    fi
+    chmod 0700 "$stage" 2>/dev/null || true
+    die "${message}；暂存与备份保留在 ${stage}"
+}
+
+restore_env() {
+    local stage="$1" had_previous_env="$2"
+    if [[ ${had_previous_env} -eq 1 ]]; then
+        atomic_replace "${stage}/env.previous" .env 0600
+    else
+        rm -f .env
+    fi
+}
+
+rollback_install_transaction() {
+    local stage="$1" failed=0 compose_restored=1 env_restored=1
+
+    if [[ ${INSTALL_STACK_TOUCHED} -eq 1 ]]; then
+        compose down || {
+            warn "未能完整停止新栈，继续尝试恢复原部署"
+            failed=1
+        }
+    fi
+
+    if [[ ${INSTALL_ENV_MAY_BE_REPLACED} -eq 1 ]] && ! restore_env "$stage" "$INSTALL_HAD_PREVIOUS_ENV"; then
+        env_restored=0
+        failed=1
+    fi
+
+    if [[ ${INSTALL_COMPOSE_MAY_BE_REPLACED} -eq 1 ]]; then
+        if [[ ${INSTALL_HAD_PREVIOUS_COMPOSE} -eq 1 ]]; then
+            if ! atomic_replace "${stage}/docker-compose.yml.previous" docker-compose.yml 0644; then
+                compose_restored=0
+                failed=1
+            fi
+        elif ! rm -f docker-compose.yml; then
+            compose_restored=0
+            failed=1
+        fi
+    fi
+
+    if [[ ${INSTALL_STACK_TOUCHED} -eq 1 && ${INSTALL_HAD_PREVIOUS_COMPOSE} -eq 1 && ${compose_restored} -eq 1 && ${env_restored} -eq 1 ]]; then
+        compose up -d || failed=1
+    fi
+
+    if [[ ${failed} -eq 0 ]]; then
+        INSTALL_ENV_MAY_BE_REPLACED=0
+        INSTALL_COMPOSE_MAY_BE_REPLACED=0
+        INSTALL_STACK_TOUCHED=0
+    fi
+    return "$failed"
+}
+
+install_signal_handler() {
+    local signal="$1" exit_code=1 stage="$INSTALL_STAGE" configure_stage="$CONFIGURE_BOT_STAGE" failed=0
+    case "$signal" in
+        HUP) exit_code=129 ;;
+        INT) exit_code=130 ;;
+        TERM) exit_code=143 ;;
+    esac
+    trap - HUP INT TERM
+
+    if ! cleanup_configure_bot_stage; then
+        failed=1
+        err "Telegram 临时目录清理失败，路径保留在 ${configure_stage}"
+    fi
+
+    if [[ -n "$stage" ]]; then
+        if [[ ${INSTALL_COMMITTED} -eq 0 ]]; then
+            rollback_install_transaction "$stage" || failed=1
+        fi
+        if [[ ${failed} -eq 0 ]]; then
+            if rm -rf -- "$stage"; then
+                if [[ ${INSTALL_COMMITTED} -eq 1 ]]; then
+                    err "安装完成后收到 ${signal} 信号，新部署保持运行，暂存已清理"
+                else
+                    err "安装被 ${signal} 信号中断，原部署已恢复"
+                fi
+            else
+                failed=1
+            fi
+        fi
+        if [[ ${failed} -ne 0 ]]; then
+            chmod 0700 "$stage" 2>/dev/null || true
+            err "安装被 ${signal} 信号中断，恢复或清理未完全成功；暂存与备份保留在 ${stage}"
+        fi
+    fi
+    exit "$exit_code"
+}
+
+begin_install_transaction() {
+    INSTALL_STAGE="$1"
+    INSTALL_HAD_PREVIOUS_COMPOSE="$2"
+    INSTALL_HAD_PREVIOUS_ENV="$3"
+    INSTALL_ENV_MAY_BE_REPLACED=0
+    INSTALL_COMPOSE_MAY_BE_REPLACED=0
+    INSTALL_STACK_TOUCHED=0
+    INSTALL_COMMITTED=0
+    trap 'install_signal_handler HUP' HUP
+    trap 'install_signal_handler INT' INT
+    trap 'install_signal_handler TERM' TERM
+}
+
+configure_bot() {
+    local destination="$1" chat_id="" token="" grep_status
+    shift
+    if [[ $# -eq 0 ]]; then
+        if [ -f .env ]; then
+            install -m 0600 .env "$destination"
+        else
+            rm -f -- "$destination"
+        fi
+        return
     elif [[ $# -eq 1 && "$1" == "--telegram" ]]; then
-        read -r -p "Telegram Chat ID: " chat_id
-        read -r -s -p "Telegram Bot Token: " token
+        if ! read -r -p "Telegram Chat ID: " chat_id; then
+            err "读取 Telegram Chat ID 失败"
+            return 1
+        fi
+        if ! read -r -s -p "Telegram Bot Token: " token; then
+            echo
+            err "读取 Telegram Bot Token 失败"
+            return 1
+        fi
         echo
     elif [[ $# -eq 2 ]]; then
         warn "命令行参数会进入 Shell 历史，后续建议使用 --telegram 交互配置"
         chat_id="$1"
         token="$2"
     else
-        die "Telegram 配置参数无效"
+        err "Telegram 配置参数无效"
+        return 1
     fi
 
-    [[ "$chat_id" =~ ^-?[0-9]+$ || "$chat_id" =~ ^@[A-Za-z0-9_]+$ ]] || die "Telegram Chat ID 格式无效"
-    [[ "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]] || die "Telegram Bot Token 格式无效"
+    if [[ ! "$chat_id" =~ ^-?[0-9]+$ && ! "$chat_id" =~ ^@[A-Za-z0-9_]+$ ]]; then
+        err "Telegram Chat ID 格式无效"
+        return 1
+    fi
+    if [[ ! "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        err "Telegram Bot Token 格式无效"
+        return 1
+    fi
 
-    stage=$(mktemp -d)
+    CONFIGURE_BOT_STAGE=$(mktemp -d) || {
+        err "创建 Telegram 配置暂存目录失败"
+        return 1
+    }
+    chmod 0700 "$CONFIGURE_BOT_STAGE" || {
+        cleanup_configure_bot_stage || true
+        err "保护 Telegram 配置暂存目录失败"
+        return 1
+    }
     if [ -f .env ]; then
-        grep -vE '^(TG_CHAT_ID|TG_BOT_TOKEN|COMPOSE_PROFILES)=' .env > "${stage}/env" || true
+        grep -vE '^(TG_CHAT_ID|TG_BOT_TOKEN|COMPOSE_PROFILES)=' .env > "${CONFIGURE_BOT_STAGE}/env"
+        grep_status=$?
+        if [[ ${grep_status} -gt 1 ]]; then
+            cleanup_configure_bot_stage || true
+            err "读取现有 .env 失败"
+            return 1
+        fi
     else
-        : > "${stage}/env"
+        : > "${CONFIGURE_BOT_STAGE}/env"
     fi
-    printf 'TG_CHAT_ID=%s\nTG_BOT_TOKEN=%s\nCOMPOSE_PROFILES=telegram\n' "$chat_id" "$token" >> "${stage}/env"
-    install -m 0600 "${stage}/env" .env
-    rm -rf -- "$stage"
+    if ! printf 'TG_CHAT_ID=%s\nTG_BOT_TOKEN=%s\nCOMPOSE_PROFILES=telegram\n' "$chat_id" "$token" >> "${CONFIGURE_BOT_STAGE}/env"; then
+        cleanup_configure_bot_stage || true
+        err "生成 Telegram 配置失败"
+        return 1
+    fi
+    if ! atomic_replace "${CONFIGURE_BOT_STAGE}/env" "$destination" 0600; then
+        cleanup_configure_bot_stage || true
+        err "Telegram 配置保存失败"
+        return 1
+    fi
+    if ! cleanup_configure_bot_stage; then
+        err "Telegram 临时目录清理失败，路径保留在 ${CONFIGURE_BOT_STAGE}"
+        return 1
+    fi
 }
 
 install_dashboard() {
-    local stage
+    local stage had_previous_compose=0 had_previous_env=0
     install_docker
-    configure_bot "$@"
 
-    if [[ ${FORCE_INSTALL} -eq 0 ]] && compose ps --status running --services 2>/dev/null | grep -qx web; then
-        if [[ $# -gt 0 ]]; then
-            compose up -d --build || die "Telegram 服务更新失败"
-        fi
+    if [[ ${FORCE_INSTALL} -eq 0 && $# -eq 0 ]] && compose ps --status running --services 2>/dev/null | grep -qx web; then
         return 0
     fi
 
     step "安装面板"
-    stage=$(mktemp -d)
-    mkdir -p "${stage}/service/bot" "${stage}/service/web/css" "${stage}/service/web/js"
-    download_file "${GITHUB_RAW_URL}/docker-compose.yml" "${stage}/docker-compose.yml"
-    download_file "${GITHUB_RAW_URL}/service/bot/Dockerfile" "${stage}/service/bot/Dockerfile"
-    download_file "${GITHUB_RAW_URL}/service/bot/bot.py" "${stage}/service/bot/bot.py"
-    download_file "${GITHUB_RAW_URL}/service/web/Dockerfile" "${stage}/service/web/Dockerfile"
-    download_file "${GITHUB_RAW_URL}/service/web/index.html" "${stage}/service/web/index.html"
-    download_file "${GITHUB_RAW_URL}/service/web/favicon.svg" "${stage}/service/web/favicon.svg"
-    download_file "${GITHUB_RAW_URL}/service/web/css/app.css" "${stage}/service/web/css/app.css"
-    download_file "${GITHUB_RAW_URL}/service/web/js/app.js" "${stage}/service/web/js/app.js"
+    stage=$(mktemp -d) || die "创建安装暂存目录失败"
+    chmod 0700 "$stage" || { rm -rf -- "$stage"; die "保护安装暂存目录失败"; }
+    [ -f .env ] && had_previous_env=1
+    [ -f docker-compose.yml ] && had_previous_compose=1
+    begin_install_transaction "$stage" "$had_previous_compose" "$had_previous_env"
+    if [ -f .env ]; then
+        install -m 0600 .env "${stage}/env.previous" || {
+            abort_install "$stage" "备份现有 .env 失败，部署未修改"
+        }
+    fi
+    if [ -f docker-compose.yml ]; then
+        install -m 0644 docker-compose.yml "${stage}/docker-compose.yml.previous" || {
+            abort_install "$stage" "备份现有 Compose 失败，部署未修改"
+        }
+    fi
 
-    install -d -m 0755 service/bot service/web/css service/web/js json
-    install -m 0644 "${stage}/docker-compose.yml" docker-compose.yml
-    install -m 0644 "${stage}/service/bot/Dockerfile" service/bot/Dockerfile
-    install -m 0644 "${stage}/service/bot/bot.py" service/bot/bot.py
-    install -m 0644 "${stage}/service/web/Dockerfile" service/web/Dockerfile
-    install -m 0644 "${stage}/service/web/index.html" service/web/index.html
-    install -m 0644 "${stage}/service/web/favicon.svg" service/web/favicon.svg
-    install -m 0644 "${stage}/service/web/css/app.css" service/web/css/app.css
-    install -m 0644 "${stage}/service/web/js/app.js" service/web/js/app.js
-    rm -rf -- "$stage"
+    download_file "${GITHUB_RAW_URL}/docker-compose.yml" "${stage}/docker-compose.yml" || {
+        abort_install "$stage" "Compose 下载失败，部署未修改"
+    }
+    if ! configure_bot "${stage}/env.next" "$@"; then
+        abort_install "$stage" "Telegram 配置失败，原 .env 未修改"
+    fi
+
+    if ! compose_file "${stage}/docker-compose.yml" "${stage}/env.next" config --quiet; then
+        abort_install "$stage" "新 Compose 配置无效，现有部署未修改"
+    fi
+    if ! compose_file "${stage}/docker-compose.yml" "${stage}/env.next" pull; then
+        abort_install "$stage" "新镜像拉取失败，现有部署未修改"
+    fi
+
+    install -d -m 0755 json || {
+        abort_install "$stage" "创建数据目录失败，Compose 尚未替换"
+    }
+    if [ ! -f json/stats.json ]; then
+        printf '%s\n' '{"servers":[],"sslcerts":[]}' > "${stage}/stats.json"
+        install -m 0644 "${stage}/stats.json" json/stats.json || {
+            abort_install "$stage" "初始化 stats.json 失败，Compose 尚未替换"
+        }
+    fi
 
     if [ ! -f "$CONFIG_FILE" ]; then
         printf '%s\n' '{"servers":[]}' > "$CONFIG_FILE"
     fi
     chmod 0600 "$CONFIG_FILE"
 
-    step "构建并启动面板"
-    compose up -d --build || die "面板启动失败"
+    if [ -f "${stage}/env.next" ]; then
+        INSTALL_ENV_MAY_BE_REPLACED=1
+        if ! atomic_replace "${stage}/env.next" .env 0600; then
+            if rollback_install_transaction "$stage"; then
+                abort_install "$stage" "原子应用 .env 失败，原部署已恢复"
+            fi
+            retain_install_stage "$stage" "原子应用 .env 失败且自动恢复未完全成功"
+        fi
+    fi
+
+    INSTALL_COMPOSE_MAY_BE_REPLACED=1
+    if ! atomic_replace "${stage}/docker-compose.yml" docker-compose.yml 0644; then
+        if rollback_install_transaction "$stage"; then
+            abort_install "$stage" "原子替换 Compose 失败，原部署已恢复"
+        fi
+        retain_install_stage "$stage" "原子替换 Compose 失败且自动恢复未完全成功"
+    fi
+
+    step "启动面板"
+    INSTALL_STACK_TOUCHED=1
+    if ! compose up -d --wait --wait-timeout 90; then
+        if [[ ${had_previous_compose} -eq 1 ]]; then
+            warn "新栈启动失败，正在恢复旧 Compose"
+            if rollback_install_transaction "$stage"; then
+                abort_install "$stage" "新栈启动失败，已恢复旧 Compose 并重新启动旧栈"
+            fi
+            retain_install_stage "$stage" "新栈启动失败，旧栈自动恢复未完全成功"
+        fi
+
+        if rollback_install_transaction "$stage"; then
+            abort_install "$stage" "首次安装启动失败，新栈和新 Compose 已清理；配置和数据已保留"
+        fi
+        retain_install_stage "$stage" "首次安装启动失败，自动清理未完全成功"
+    fi
+
+    INSTALL_COMMITTED=1
+    if ! rm -rf -- "$stage"; then
+        retain_install_stage "$stage" "面板已启动，但含敏感配置的暂存目录清理失败"
+    fi
+    reset_install_transaction
     ok "面板已启动，web 地址：http://<本机IP>:8081"
 }
 

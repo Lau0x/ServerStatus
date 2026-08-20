@@ -14,7 +14,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check shell syntax
-        run: bash -n sss.sh agent/sss-agent.sh
+        run: bash -n sss.sh agent/sss-agent.sh tests/test_installer.sh
+
+      - name: Check installer rollback
+        run: bash tests/test_installer.sh
 
       - name: Check Python and bot behavior
         run: |
@@ -22,10 +25,69 @@ jobs:
           python3 -m unittest discover -s tests -v
 
       - name: Check JavaScript syntax
-        run: node --check service/web/js/app.js
+        run: |
+          node --check service/web/js/app.js
+          node --test tests/test_web.js
 
       - name: Validate Compose configuration
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose --profile telegram config --quiet
+
+      - name: Pull default images anonymously
+        shell: bash
+        run: |
+          anonymous_config=$(mktemp -d "${RUNNER_TEMP}/sss-docker-config.XXXXXX")
+          cleanup() {
+            exit_code=$?
+            trap - EXIT
+            rm -rf -- "$anonymous_config"
+            exit "$exit_code"
+          }
+          trap cleanup EXIT
+          unset SSS_SRV_IMAGE SSS_WEB_IMAGE SSS_BOT_IMAGE
+          DOCKER_CONFIG="$anonymous_config" docker compose --profile telegram pull
 
       - name: Build local images
-        run: docker compose --profile telegram build
+        run: |
+          docker build --tag serverstatus-ci-web:local --file service/web/Dockerfile service/web
+          docker build --tag serverstatus-ci-bot:local --file service/bot/Dockerfile service/bot
+
+      - name: Smoke test Compose stack
+        shell: bash
+        run: |
+          project_name="sss-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          smoke_dir="${RUNNER_TEMP}/${project_name}"
+          mkdir -p "${smoke_dir}/json"
+          cp docker-compose.yml "${smoke_dir}/docker-compose.yml"
+          printf '%s\n' '{"servers":[]}' > "${smoke_dir}/config.json"
+          printf '%s\n' '{"servers":[],"sslcerts":[]}' > "${smoke_dir}/json/stats.json"
+
+          export SSS_WEB_IMAGE=serverstatus-ci-web:local
+          export SSS_BOT_IMAGE=serverstatus-ci-bot:local
+          export SSS_WEB_BIND=127.0.0.1
+          export SSS_WEB_PORT=18081
+          export SSS_REPORT_BIND=127.0.0.1
+          export SSS_REPORT_PORT=35602
+
+          cleanup() {
+            exit_code=$?
+            trap - EXIT
+            if [ "$exit_code" -ne 0 ]; then
+              docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" ps || true
+              docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" logs --no-color || true
+            fi
+            docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" down --volumes --remove-orphans || true
+            rm -rf -- "$smoke_dir"
+            exit "$exit_code"
+          }
+          trap cleanup EXIT
+
+          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" up -d --wait --wait-timeout 90
+          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" exec -T srv wget -q -O /dev/null http://127.0.0.1/api/health
+          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" ps --status running --services | grep -qx bot
+          docker compose --profile telegram -p "$project_name" -f "${smoke_dir}/docker-compose.yml" exec -T bot \
+            python -c "import os,time; p='/tmp/serverstatus-bot-heartbeat'; deadline=time.time()+30; exec('while not os.path.isfile(p) and time.time() < deadline:\n time.sleep(1)'); assert os.path.isfile(p) and time.time()-os.path.getmtime(p) <= 45"
+          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:18081/
+          curl --fail --silent --show-error http://127.0.0.1:18081/json/stats.json |
+            python3 -c 'import json, sys; assert json.load(sys.stdin).get("servers") == []'
