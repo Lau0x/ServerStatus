@@ -18,6 +18,10 @@ printf '%s\n' '{"servers":[{"name":"keep-stats"}]}' > json/stats.json
 sed '/^# ================= 入口 =================$/,$d' "${repo_root}/sss.sh" > sss-definitions.sh
 source sss-definitions.sh
 
+file_mode() {
+    stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
+}
+
 docker() {
     case "$*" in
         "compose version") return 0 ;;
@@ -479,7 +483,7 @@ set -e
 [[ $status -eq 1 ]]
 backup_path=$(sed -n 's/.*备份保留在 //p' installer-error.log)
 [[ -n "$backup_path" && -d "$backup_path" ]]
-[[ $(stat -f '%Lp' "$backup_path" 2>/dev/null || stat -c '%a' "$backup_path") == 700 ]]
+[[ $(file_mode "$backup_path") == 700 ]]
 grep -qx 'old-compose-marker' "$backup_path/docker-compose.yml.previous"
 grep -q '旧栈自动恢复未完全成功；暂存与备份保留在' installer-error.log
 
@@ -501,6 +505,6 @@ set -e
 [[ $status -eq 143 ]]
 signal_stage=$(cat signal-stage-path)
 [[ -d "$signal_stage" ]]
-[[ $(stat -f '%Lp' "$signal_stage" 2>/dev/null || stat -c '%a' "$signal_stage") == 700 ]]
+[[ $(file_mode "$signal_stage") == 700 ]]
 grep -qx 'old-compose-marker' "$signal_stage/docker-compose.yml.previous"
 grep -q "暂存与备份保留在 ${signal_stage}" installer-errors.log
