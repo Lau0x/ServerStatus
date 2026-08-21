@@ -24,7 +24,7 @@ services:
 
   # 前端面板: 静态资源打包进镜像, 运行时读取共享的 json/stats.json
   web:
-    image: "${SSS_WEB_IMAGE:-ghcr.io/lau0x/serverstatus-web@sha256:f4b30fac43667d4cadeba75687ce857463ebf5a3221ffba2120912ef6c7ea77e}"
+    image: "${SSS_WEB_IMAGE:-ghcr.io/lau0x/serverstatus-web@sha256:d7e809cf7a0ec7e0b47fffe20d301e5cf42d60aabf38bab23d41a48615f7ba3d}"
     restart: unless-stopped
     volumes:
       - ./json:/usr/share/nginx/html/json:ro
