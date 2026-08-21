@@ -1,11 +1,14 @@
 # ServerStatus
 
-基于 [cppla/ServerStatus](https://github.com/cppla/ServerStatus) 的轻量级多服务器监控面板。这个 Fork 增加了交互式节点管理、systemd Agent、Telegram 通知，以及可切换的 Classic / Modern 两套 Web 界面。
+[简体中文](README.md) | [English](README.en.md)
+
+基于 [cppla/ServerStatus](https://github.com/cppla/ServerStatus) 的轻量级多服务器监控面板。这个 Fork 增加了交互式节点管理、systemd Agent、Telegram 通知，以及可切换的 Classic / Modern 两套中英文 Web 界面。
 
 ## 功能
 
 - CPU、内存、磁盘、负载、网络、月流量与三网延迟监控
 - Classic 密集表格和 Modern 仪表盘自由切换，选择自动保存在浏览器
+- 简体中文和英文自动适配浏览器语言，也可以手动切换
 - 明亮、深色、跟随系统三种主题
 - 交互式节点增删改查，修改前自动备份配置
 - Agent 以 systemd 服务运行并自动重连
@@ -40,9 +43,10 @@ sudo ./sss.sh
 
 ### 2. 使用 Web 面板
 
-页面右上角提供两组切换：
+页面右上角提供三组切换：
 
 - `Classic / Modern`：切换经典密集表格与现代仪表盘。首次访问默认 Classic，选择会保存在当前浏览器。
+- `中 / EN`：切换简体中文和英文。首次访问跟随浏览器语言，手动选择后会保存在当前浏览器。
 - 太阳 / 月亮 / 屏幕：切换明亮、深色和跟随系统主题。
 
 Modern 视图支持节点名称、地区搜索和在线状态筛选；Classic 视图在窄屏设备上可以横向滑动查看全部指标。

@@ -12,11 +12,18 @@
       try {
         var t = localStorage.getItem('theme') || 'system';
         var l = localStorage.getItem('serverstatus-layout') || 'classic';
+        var savedLanguage = localStorage.getItem('serverstatus-language');
+        var browserLanguage = navigator.language || 'en';
+        var language = savedLanguage === 'zh' || savedLanguage === 'en'
+          ? savedLanguage
+          : (/^zh\b/i.test(browserLanguage) ? 'zh' : 'en');
         var d = t === 'system'
           ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
           : t;
         document.documentElement.dataset.theme = d;
         document.documentElement.dataset.layout = l === 'classic' ? 'classic' : 'modern';
+        document.documentElement.dataset.language = language;
+        document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
       } catch (e) {}
     })();
   </script>
@@ -36,7 +43,7 @@
           </svg>
         </span>
         <span class="brand-copy">
-          <span class="eyebrow">Fleet telemetry</span>
+          <span class="eyebrow" data-i18n="brand.eyebrow">Fleet telemetry</span>
           <h1>Server Status</h1>
         </span>
       </div>
@@ -44,20 +51,24 @@
       <div class="masthead-actions">
         <div id="feed-status" class="feed-status loading" aria-live="polite">
           <span class="feed-light"></span>
-          <span id="updated">Connecting to telemetry…</span>
+          <span id="updated" data-i18n="feed.connecting">Connecting to telemetry…</span>
         </div>
-        <div class="view-switch" role="group" aria-label="Dashboard layout">
-          <button data-layout-choice="modern" title="Modern dashboard">Modern</button>
-          <button data-layout-choice="classic" title="Classic table">Classic</button>
+        <div class="view-switch" role="group" aria-label="Dashboard layout" data-i18n-aria="view.group">
+          <button data-layout-choice="modern" data-i18n="view.modern" data-i18n-title="view.modern_title" title="Modern dashboard">Modern</button>
+          <button data-layout-choice="classic" data-i18n="view.classic" data-i18n-title="view.classic_title" title="Classic table">Classic</button>
         </div>
-        <div class="theme-switch" role="group" aria-label="Color theme">
-          <button data-theme-choice="light" title="Light theme" aria-label="Light theme">
+        <div class="language-switch" role="group" aria-label="Language" data-i18n-aria="language.group">
+          <button data-language-choice="zh" title="简体中文">中</button>
+          <button data-language-choice="en" title="English">EN</button>
+        </div>
+        <div class="theme-switch" role="group" aria-label="Color theme" data-i18n-aria="theme.group">
+          <button data-theme-choice="light" data-i18n-title="theme.light" data-i18n-aria="theme.light" title="Light theme" aria-label="Light theme">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></svg>
           </button>
-          <button data-theme-choice="dark" title="Dark theme" aria-label="Dark theme">
+          <button data-theme-choice="dark" data-i18n-title="theme.dark" data-i18n-aria="theme.dark" title="Dark theme" aria-label="Dark theme">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 15.4A9 9 0 0 1 8.6 3.7 9 9 0 1 0 20.3 15.4Z"/></svg>
           </button>
-          <button data-theme-choice="system" title="System theme" aria-label="System theme">
+          <button data-theme-choice="system" data-i18n-title="theme.system" data-i18n-aria="theme.system" title="System theme" aria-label="System theme">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
           </button>
         </div>
@@ -66,58 +77,58 @@
 
     <main>
       <div class="view-mode view-modern">
-        <section class="overview" aria-label="Fleet overview">
+        <section class="overview" aria-label="Fleet overview" data-i18n-aria="panel.fleet_overview">
           <article class="metric-card metric-primary">
-            <span class="metric-label">Active nodes</span>
+            <span class="metric-label" data-i18n="metric.active">Active nodes</span>
             <div class="metric-line">
               <strong id="metric-online">–</strong>
-              <span class="metric-unit">online</span>
+              <span class="metric-unit" data-i18n="status.online_lower">online</span>
             </div>
-            <span id="online-caption" class="metric-caption">Waiting for telemetry</span>
+            <span id="online-caption" class="metric-caption" data-i18n="metric.waiting">Waiting for telemetry</span>
           </article>
 
           <article class="metric-card">
-            <span class="metric-label">Offline nodes</span>
+            <span class="metric-label" data-i18n="metric.offline">Offline nodes</span>
             <div class="metric-line">
               <strong id="metric-offline">–</strong>
-              <span class="metric-unit">need attention</span>
+              <span class="metric-unit" data-i18n="metric.attention">need attention</span>
             </div>
-            <span class="metric-caption">Muted below, never hidden</span>
+            <span class="metric-caption" data-i18n="metric.offline_hint">Muted below, never hidden</span>
           </article>
 
           <article class="metric-card health-card">
-            <span class="metric-label">Fleet health</span>
+            <span class="metric-label" data-i18n="metric.health">Fleet health</span>
             <div class="metric-line">
               <strong id="metric-health">–</strong>
-              <span class="metric-unit">availability</span>
+              <span class="metric-unit" data-i18n="metric.availability">availability</span>
             </div>
-            <div id="fleet-grid" class="fleet-grid" aria-label="Node health map"></div>
+            <div id="fleet-grid" class="fleet-grid" aria-label="Node health map" data-i18n-aria="panel.health_map"></div>
           </article>
 
           <article class="metric-card signal-card">
-            <span class="metric-label">Telemetry</span>
+            <span class="metric-label" data-i18n="metric.telemetry">Telemetry</span>
             <div class="signal-orbit" aria-hidden="true">
               <span></span><span></span><span></span>
             </div>
-            <span class="metric-caption">Live polling · 1.5 second cadence</span>
+            <span class="metric-caption" data-i18n="metric.cadence">Live polling · 1.5 second cadence</span>
           </article>
         </section>
 
         <section class="fleet-panel">
           <div class="panel-head">
             <div>
-              <span class="eyebrow">Infrastructure</span>
-              <h2>Node overview</h2>
+              <span class="eyebrow" data-i18n="panel.infrastructure">Infrastructure</span>
+              <h2 data-i18n="panel.overview">Node overview</h2>
             </div>
             <div class="panel-tools">
               <label class="search-box">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-                <input id="node-search" type="search" placeholder="Search node or region" autocomplete="off" aria-label="Search nodes">
+                <input id="node-search" type="search" placeholder="Search node or region" data-i18n-placeholder="search.placeholder" data-i18n-aria="search.label" autocomplete="off" aria-label="Search nodes">
               </label>
-              <div class="filter-group" role="group" aria-label="Filter nodes">
-                <button class="active" data-filter="all">All <span id="filter-all-count">0</span></button>
-                <button data-filter="online">Online <span id="filter-online-count">0</span></button>
-                <button data-filter="offline">Offline <span id="filter-offline-count">0</span></button>
+              <div class="filter-group" role="group" aria-label="Filter nodes" data-i18n-aria="panel.filter">
+                <button class="active" data-filter="all"><span data-i18n="filter.all">All</span> <span id="filter-all-count">0</span></button>
+                <button data-filter="online"><span data-i18n="filter.online">Online</span> <span id="filter-online-count">0</span></button>
+                <button data-filter="offline"><span data-i18n="filter.offline">Offline</span> <span id="filter-offline-count">0</span></button>
               </div>
             </div>
           </div>
@@ -126,70 +137,70 @@
             <table id="grid">
               <thead>
                 <tr>
-                  <th>Node</th>
-                  <th>Status</th>
-                  <th>Uptime</th>
-                  <th>Resources</th>
-                  <th>Live network</th>
-                  <th>Traffic</th>
-                  <th>Latency</th>
+                  <th data-i18n="table.node">Node</th>
+                  <th data-i18n="table.status">Status</th>
+                  <th data-i18n="table.uptime">Uptime</th>
+                  <th data-i18n="table.resources">Resources</th>
+                  <th data-i18n="table.live_network">Live network</th>
+                  <th data-i18n="table.traffic">Traffic</th>
+                  <th data-i18n="table.latency">Latency</th>
                 </tr>
               </thead>
               <tbody id="rows">
-                <tr class="empty"><td colspan="7"><span class="loading-line"></span>Loading fleet telemetry…</td></tr>
+                <tr class="empty"><td colspan="7"><span class="loading-line"></span><span data-i18n="feed.loading_fleet">Loading fleet telemetry…</span></td></tr>
               </tbody>
             </table>
           </div>
         </section>
       </div>
 
-      <section class="view-mode view-classic" aria-label="Classic server status table">
+      <section class="view-mode view-classic" aria-label="Classic server status table" data-i18n-aria="panel.classic_table">
         <div class="classic-panel">
           <div class="classic-head">
             <div>
-              <span class="classic-kicker">Classic monitor</span>
-              <h2>All servers</h2>
+              <span class="classic-kicker" data-i18n="classic.kicker">Classic monitor</span>
+              <h2 data-i18n="classic.all_servers">All servers</h2>
             </div>
             <div class="classic-summary">
-              <span><strong id="classic-online">–</strong> online</span>
+              <span><strong id="classic-online">–</strong> <span data-i18n="status.online_lower">online</span></span>
               <span class="classic-summary-divider"></span>
-              <span><strong id="classic-total">–</strong> total</span>
+              <span><strong id="classic-total">–</strong> <span data-i18n="classic.total_lower">total</span></span>
             </div>
           </div>
           <div class="classic-scroll">
             <table id="classic-grid" class="classic-grid">
               <thead>
                 <tr>
-                  <th>Protocol</th>
-                  <th>Monthly ↓↑</th>
-                  <th>Node</th>
-                  <th>Type</th>
-                  <th>Region</th>
-                  <th>Uptime</th>
-                  <th>Load</th>
-                  <th>Network ↓↑</th>
-                  <th>Total ↓↑</th>
+                  <th data-i18n="classic.protocol">Protocol</th>
+                  <th data-i18n="classic.monthly">Monthly ↓↑</th>
+                  <th data-i18n="table.node">Node</th>
+                  <th data-i18n="classic.type">Type</th>
+                  <th data-i18n="classic.region">Region</th>
+                  <th data-i18n="table.uptime">Uptime</th>
+                  <th data-i18n="classic.load">Load</th>
+                  <th data-i18n="classic.network">Network ↓↑</th>
+                  <th data-i18n="classic.total_traffic">Total ↓↑</th>
                   <th>CPU</th>
                   <th>RAM</th>
-                  <th>Disk</th>
+                  <th data-i18n="classic.disk">Disk</th>
                   <th>CU · CT · CM</th>
                 </tr>
               </thead>
               <tbody id="classic-rows">
-                <tr class="classic-empty"><td colspan="13"><span class="loading-line"></span>Loading fleet telemetry…</td></tr>
+                <tr class="classic-empty"><td colspan="13"><span class="loading-line"></span><span data-i18n="feed.loading_fleet">Loading fleet telemetry…</span></td></tr>
               </tbody>
             </table>
           </div>
           <div class="classic-foot">
-            <span id="classic-updated">Connecting to telemetry…</span>
-            <span>Refreshes every 1.5 seconds</span>
+            <span id="classic-updated" data-i18n="feed.connecting">Connecting to telemetry…</span>
+            <span data-i18n="classic.refresh">Refreshes every 1.5 seconds</span>
           </div>
         </div>
       </section>
 
       <footer class="foot">
-        <span>Built on ServerStatus</span>
-        <a href="https://github.com/Lau0x/ServerStatus" target="_blank" rel="noopener">View source</a>
+        <span data-i18n="footer.built">Built on ServerStatus</span>
+        <a href="https://github.com/Lau0x/ServerStatus" target="_blank" rel="noopener" data-i18n="footer.source">View source</a>
       </footer>
     </main>
   </div>

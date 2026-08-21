@@ -41,6 +41,24 @@ test('layout choice defaults safely and classic rows keep the dense status model
   assert.doesNotMatch(html, /<Edge>/);
 });
 
+test('language follows the browser until a saved choice takes precedence', () => {
+  assert.equal(feed.normalizeLanguage('zh-CN'), 'zh');
+  assert.equal(feed.normalizeLanguage('en-US'), 'en');
+  assert.equal(feed.initialLanguage(null, 'zh-TW'), 'zh');
+  assert.equal(feed.initialLanguage(null, 'fr-FR'), 'en');
+  assert.equal(feed.initialLanguage('en', 'zh-CN'), 'en');
+  assert.equal(feed.translate('zh', 'status.offline'), '离线');
+  assert.equal(feed.translate('en', 'metric.reporting', { online: 2, total: 3 }), '2 of 3 nodes reporting');
+
+  const failed = {
+    data: { servers: [] },
+    lastSuccess: 1000,
+    sourceUpdated: null,
+    error: new Error('down')
+  };
+  assert.equal(feed.feedNotice(failed, 5000, 30000, 'zh').text, '数据不可用 · 正在显示 4 秒前的数据');
+});
+
 test('fetchStats rejects non-success HTTP responses', async () => {
   let parsed = false;
   const response = {

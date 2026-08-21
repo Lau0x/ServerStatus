@@ -2,10 +2,207 @@
 (function () {
   'use strict';
 
-  var S = { servers: [], expanded: {}, filter: 'all', query: '' };
+  var S = { servers: [], expanded: {}, filter: 'all', query: '', loaded: false, feedState: null };
   var POLL_INTERVAL_MS = 1500;
   var FETCH_TIMEOUT_MS = 10000;
   var STALE_AFTER_MS = 30000;
+  var currentLanguage = 'en';
+
+  var I18N = {
+    en: {
+      'brand.eyebrow': 'Fleet telemetry',
+      'feed.connecting': 'Connecting to telemetry…',
+      'feed.loading_fleet': 'Loading fleet telemetry…',
+      'feed.unavailable': 'Data unavailable',
+      'feed.using_data': 'Data unavailable · using data from {age}',
+      'feed.stale': 'Stale data · {age}',
+      'feed.loading': 'Loading…',
+      'feed.updated': 'Updated {time}',
+      'view.modern': 'Modern',
+      'view.classic': 'Classic',
+      'view.modern_title': 'Modern dashboard',
+      'view.classic_title': 'Classic table',
+      'view.group': 'Dashboard layout',
+      'language.group': 'Language',
+      'theme.group': 'Color theme',
+      'theme.light': 'Light theme',
+      'theme.dark': 'Dark theme',
+      'theme.system': 'System theme',
+      'metric.active': 'Active nodes',
+      'metric.waiting': 'Waiting for telemetry',
+      'metric.offline': 'Offline nodes',
+      'metric.attention': 'need attention',
+      'metric.offline_hint': 'Muted below, never hidden',
+      'metric.health': 'Fleet health',
+      'metric.availability': 'availability',
+      'metric.telemetry': 'Telemetry',
+      'metric.cadence': 'Live polling · 1.5 second cadence',
+      'metric.reporting': '{online} of {total} nodes reporting',
+      'status.online_lower': 'online',
+      'status.online': 'Online',
+      'status.offline': 'Offline',
+      'panel.infrastructure': 'Infrastructure',
+      'panel.overview': 'Node overview',
+      'panel.fleet_overview': 'Fleet overview',
+      'panel.health_map': 'Node health map',
+      'panel.filter': 'Filter nodes',
+      'panel.classic_table': 'Classic server status table',
+      'search.placeholder': 'Search node or region',
+      'search.label': 'Search nodes',
+      'filter.all': 'All',
+      'filter.online': 'Online',
+      'filter.offline': 'Offline',
+      'table.node': 'Node',
+      'table.status': 'Status',
+      'table.uptime': 'Uptime',
+      'table.resources': 'Resources',
+      'table.live_network': 'Live network',
+      'table.traffic': 'Traffic',
+      'table.latency': 'Latency',
+      'classic.kicker': 'Classic monitor',
+      'classic.all_servers': 'All servers',
+      'classic.total_lower': 'total',
+      'classic.protocol': 'Protocol',
+      'classic.monthly': 'Monthly ↓↑',
+      'classic.type': 'Type',
+      'classic.region': 'Region',
+      'classic.load': 'Load',
+      'classic.network': 'Network ↓↑',
+      'classic.total_traffic': 'Total ↓↑',
+      'classic.disk': 'Disk',
+      'classic.refresh': 'Refreshes every 1.5 seconds',
+      'footer.built': 'Built on ServerStatus',
+      'footer.source': 'View source',
+      'node.unknown_region': 'Unknown region',
+      'node.server': 'server',
+      'protocol.dual': 'Dual stack',
+      'protocol.dual_short': 'Dual',
+      'telemetry.none': 'No telemetry',
+      'telemetry.no_signal': 'No signal',
+      'telemetry.no_traffic': 'No traffic',
+      'traffic.cycle': 'Cycle',
+      'latency.loss': '{value}% loss',
+      'load.label': 'Load {value}',
+      'empty.no_nodes': 'No nodes configured yet',
+      'empty.no_match': 'No nodes match this view',
+      'detail.network': 'Network down / up',
+      'detail.memory': 'Memory / swap',
+      'detail.disk': 'Disk / IO',
+      'detail.sockets': 'Sockets / processes',
+      'detail.processes': '{tcp} TCP · {udp} UDP · {processes} proc · {threads} threads',
+      'uptime.days': '{days}d {hours}h',
+      'uptime.hours': '{hours}h {minutes}m',
+      'age.seconds': '{value}s ago',
+      'age.minutes': '{value}m ago',
+      'age.hours': '{value}h ago'
+    },
+    zh: {
+      'brand.eyebrow': '集群遥测',
+      'feed.connecting': '正在连接遥测数据…',
+      'feed.loading_fleet': '正在加载集群数据…',
+      'feed.unavailable': '数据不可用',
+      'feed.using_data': '数据不可用 · 正在显示 {age}的数据',
+      'feed.stale': '数据已过期 · {age}',
+      'feed.loading': '加载中…',
+      'feed.updated': '更新于 {time}',
+      'view.modern': '现代',
+      'view.classic': '经典',
+      'view.modern_title': '现代仪表盘',
+      'view.classic_title': '经典表格',
+      'view.group': '面板布局',
+      'language.group': '语言',
+      'theme.group': '颜色主题',
+      'theme.light': '明亮主题',
+      'theme.dark': '深色主题',
+      'theme.system': '跟随系统',
+      'metric.active': '在线节点',
+      'metric.waiting': '等待遥测数据',
+      'metric.offline': '离线节点',
+      'metric.attention': '需关注',
+      'metric.offline_hint': '弱化显示，但不会隐藏',
+      'metric.health': '集群健康',
+      'metric.availability': '可用率',
+      'metric.telemetry': '遥测状态',
+      'metric.cadence': '实时轮询 · 每 1.5 秒更新',
+      'metric.reporting': '{total} 个节点中 {online} 个在线',
+      'status.online_lower': '在线',
+      'status.online': '在线',
+      'status.offline': '离线',
+      'panel.infrastructure': '基础设施',
+      'panel.overview': '节点概览',
+      'panel.fleet_overview': '集群概览',
+      'panel.health_map': '节点健康图',
+      'panel.filter': '筛选节点',
+      'panel.classic_table': '经典服务器状态表',
+      'search.placeholder': '搜索节点或地区',
+      'search.label': '搜索节点',
+      'filter.all': '全部',
+      'filter.online': '在线',
+      'filter.offline': '离线',
+      'table.node': '节点',
+      'table.status': '状态',
+      'table.uptime': '在线时长',
+      'table.resources': '资源',
+      'table.live_network': '实时网络',
+      'table.traffic': '流量',
+      'table.latency': '延迟',
+      'classic.kicker': '经典监控',
+      'classic.all_servers': '全部服务器',
+      'classic.total_lower': '总数',
+      'classic.protocol': '协议',
+      'classic.monthly': '月流量 ↓↑',
+      'classic.type': '类型',
+      'classic.region': '地区',
+      'classic.load': '负载',
+      'classic.network': '网络 ↓↑',
+      'classic.total_traffic': '总流量 ↓↑',
+      'classic.disk': '硬盘',
+      'classic.refresh': '每 1.5 秒刷新',
+      'footer.built': '基于 ServerStatus 构建',
+      'footer.source': '查看源码',
+      'node.unknown_region': '未知地区',
+      'node.server': '服务器',
+      'protocol.dual': '双栈',
+      'protocol.dual_short': '双栈',
+      'telemetry.none': '暂无遥测数据',
+      'telemetry.no_signal': '无网络信号',
+      'telemetry.no_traffic': '无流量数据',
+      'traffic.cycle': '周期',
+      'latency.loss': '丢包 {value}%',
+      'load.label': '负载 {value}',
+      'empty.no_nodes': '尚未配置节点',
+      'empty.no_match': '没有符合条件的节点',
+      'detail.network': '网络下行 / 上行',
+      'detail.memory': '内存 / 交换空间',
+      'detail.disk': '硬盘 / IO',
+      'detail.sockets': '连接 / 进程',
+      'detail.processes': '{tcp} TCP · {udp} UDP · {processes} 进程 · {threads} 线程',
+      'uptime.days': '{days} 天 {hours} 小时',
+      'uptime.hours': '{hours} 小时 {minutes} 分钟',
+      'age.seconds': '{value} 秒前',
+      'age.minutes': '{value} 分钟前',
+      'age.hours': '{value} 小时前'
+    }
+  };
+
+  function normalizeLanguage(language) {
+    return String(language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+  }
+
+  function initialLanguage(saved, browserLanguage) {
+    if (saved === 'zh' || saved === 'en') return saved;
+    return normalizeLanguage(browserLanguage);
+  }
+
+  function translate(language, key, values) {
+    language = normalizeLanguage(language);
+    var template = I18N[language][key] || I18N.en[key] || key;
+    return template.replace(/\{([a-zA-Z0-9_]+)\}/g, function (_, name) {
+      return values && values[name] != null ? String(values[name]) : '{' + name + '}';
+    });
+  }
+
+  function t(key, values) { return translate(currentLanguage, key, values); }
 
   /* ----------------- theme: light / dark / system ----------------- */
   var THEME_KEY = 'theme';
@@ -34,6 +231,59 @@
       mql.addEventListener('change', function () { if (getTheme() === 'system') applyTheme('system'); });
     }
     applyTheme(getTheme());
+  }
+
+  /* ----------------- language: Chinese / English ----------------- */
+  var LANGUAGE_KEY = 'serverstatus-language';
+
+  function applyStaticTranslations() {
+    var textNodes = document.querySelectorAll('[data-i18n]');
+    var placeholderNodes = document.querySelectorAll('[data-i18n-placeholder]');
+    var titleNodes = document.querySelectorAll('[data-i18n-title]');
+    var ariaNodes = document.querySelectorAll('[data-i18n-aria]');
+    var i;
+    for (i = 0; i < textNodes.length; i++) textNodes[i].textContent = t(textNodes[i].dataset.i18n);
+    for (i = 0; i < placeholderNodes.length; i++) placeholderNodes[i].setAttribute('placeholder', t(placeholderNodes[i].dataset.i18nPlaceholder));
+    for (i = 0; i < titleNodes.length; i++) titleNodes[i].setAttribute('title', t(titleNodes[i].dataset.i18nTitle));
+    for (i = 0; i < ariaNodes.length; i++) ariaNodes[i].setAttribute('aria-label', t(ariaNodes[i].dataset.i18nAria));
+  }
+
+  function applyLanguage(language) {
+    currentLanguage = normalizeLanguage(language);
+    document.documentElement.dataset.language = currentLanguage;
+    document.documentElement.lang = currentLanguage === 'zh' ? 'zh-CN' : 'en';
+    var buttons = document.querySelectorAll('[data-language-choice]');
+    for (var i = 0; i < buttons.length; i++) {
+      var active = buttons[i].dataset.languageChoice === currentLanguage;
+      buttons[i].classList.toggle('active', active);
+      buttons[i].setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+    applyStaticTranslations();
+    if (S.loaded) {
+      updateSummary();
+      renderRows();
+      renderClassicRows();
+    }
+    if (S.feedState) renderFeedStatus(S.feedState);
+  }
+
+  function setLanguage(language) {
+    language = normalizeLanguage(language);
+    localStorage.setItem(LANGUAGE_KEY, language);
+    applyLanguage(language);
+  }
+
+  function initLanguage() {
+    var buttons = document.querySelectorAll('[data-language-choice]');
+    for (var i = 0; i < buttons.length; i++) {
+      (function (button) {
+        button.addEventListener('click', function () { setLanguage(button.dataset.languageChoice); });
+      })(buttons[i]);
+    }
+    applyLanguage(initialLanguage(
+      localStorage.getItem(LANGUAGE_KEY),
+      navigator.language || navigator.userLanguage || 'en'
+    ));
   }
 
   /* ----------------- layout: modern / classic ----------------- */
@@ -97,9 +347,9 @@
     if (typeof v !== 'number') return v ? String(v) : '-';
     if (v <= 0) return '-';
     var d = Math.floor(v / 86400), h = Math.floor((v % 86400) / 3600);
-    if (d > 0) return d + 'd ' + h + 'h';
+    if (d > 0) return t('uptime.days', { days: d, hours: h });
     var m = Math.floor((v % 3600) / 60);
-    return h + 'h ' + m + 'm';
+    return t('uptime.hours', { hours: h, minutes: m });
   }
 
   function esc(s) {
@@ -160,32 +410,44 @@
     };
   }
 
-  function ageText(ms) {
+  function ageText(ms, language) {
     var seconds = Math.max(0, Math.floor(ms / 1000));
-    if (seconds < 60) return seconds + 's ago';
+    if (seconds < 60) return translate(language, 'age.seconds', { value: seconds });
     var minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return minutes + 'm ago';
-    return Math.floor(minutes / 60) + 'h ago';
+    if (minutes < 60) return translate(language, 'age.minutes', { value: minutes });
+    return translate(language, 'age.hours', { value: Math.floor(minutes / 60) });
   }
 
-  function feedNotice(state, now, staleAfter) {
+  function feedNotice(state, now, staleAfter, language) {
+    language = normalizeLanguage(language);
     if (state.error) {
       var lastDataTime = state.sourceUpdated == null ? state.lastSuccess : state.sourceUpdated;
       return {
         kind: 'error',
         text: lastDataTime == null
-          ? 'Data unavailable'
-          : 'Data unavailable · using data from ' + ageText(now - lastDataTime)
+          ? translate(language, 'feed.unavailable')
+          : translate(language, 'feed.using_data', { age: ageText(now - lastDataTime, language) })
       };
     }
     if (state.sourceUpdated != null && now - state.sourceUpdated > staleAfter) {
-      return { kind: 'stale', text: 'Stale data · ' + ageText(now - state.sourceUpdated) };
+      return { kind: 'stale', text: translate(language, 'feed.stale', { age: ageText(now - state.sourceUpdated, language) }) };
     }
     var updated = state.sourceUpdated == null ? state.lastSuccess : state.sourceUpdated;
     return {
       kind: 'ok',
-      text: updated == null ? 'Loading…' : 'Updated ' + new Date(updated).toLocaleTimeString()
+      text: updated == null
+        ? translate(language, 'feed.loading')
+        : translate(language, 'feed.updated', {
+          time: new Date(updated).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en-US')
+        })
     };
+  }
+
+  function renderFeedStatus(state) {
+    var notice = feedNotice(state, Date.now(), STALE_AFTER_MS, currentLanguage);
+    document.getElementById('updated').textContent = notice.text;
+    document.getElementById('classic-updated').textContent = notice.text;
+    document.getElementById('feed-status').className = 'feed-status ' + notice.kind;
   }
 
   function fetchStats(fetchFn, now, timeoutMs, AbortControllerImpl) {
@@ -264,16 +526,16 @@
 
   /* ----------------- cell builders ----------------- */
   function protocolLabel(server, online) {
-    if (!online) return 'Offline';
-    if (server.online4 && server.online6) return 'Dual stack';
+    if (!online) return t('status.offline');
+    if (server.online4 && server.online6) return t('protocol.dual');
     return server.online4 ? 'IPv4' : 'IPv6';
   }
 
   function nodeCell(server, online) {
     var name = String(server.name || '-');
     var initial = name.trim().charAt(0).toUpperCase() || 'N';
-    var location = server.location ? flag(server.location) + ' ' + esc(server.location) : 'Unknown region';
-    var type = server.type ? esc(server.type) : 'server';
+    var location = server.location ? flag(server.location) + ' ' + esc(server.location) : t('node.unknown_region');
+    var type = server.type ? esc(server.type) : t('node.server');
     return '<div class="node-cell">' +
       '<span class="node-icon">' + esc(initial) + '</span>' +
       '<span class="node-copy"><span class="node-name">' + esc(name) + '</span>' +
@@ -282,7 +544,7 @@
 
   function statusCell(server, online) {
     return '<div class="status-stack"><span class="status-badge' + (online ? '' : ' offline') + '">' +
-      (online ? 'Online' : 'Offline') + '</span><span class="protocol">' + protocolLabel(server, online) + '</span></div>';
+      (online ? t('status.online') : t('status.offline')) + '</span><span class="protocol">' + protocolLabel(server, online) + '</span></div>';
   }
 
   function severity(value) { return value >= 90 ? ' bad' : value >= 70 ? ' warn' : ''; }
@@ -295,22 +557,22 @@
   }
 
   function resourceCell(cpu, memory, disk, online) {
-    if (!online) return '<span class="dim">No telemetry</span>';
+    if (!online) return '<span class="dim">' + t('telemetry.none') + '</span>';
     return '<div class="resource-stack">' + resourceLine('CPU', cpu, 'cpu') +
       resourceLine('RAM', memory, 'ram') + resourceLine('SSD', disk, 'disk') + '</div>';
   }
 
   function networkCell(server, online) {
-    if (!online) return '<span class="dim">No signal</span>';
+    if (!online) return '<span class="dim">' + t('telemetry.no_signal') + '</span>';
     return '<div class="network-cell">' +
       '<span class="flow-line"><span class="flow-arrow">↑</span><span class="flow-value">' + humanSpeed(server.network_tx) + '</span></span>' +
       '<span class="flow-line down"><span class="flow-arrow">↓</span><span class="flow-value">' + humanSpeed(server.network_rx) + '</span></span></div>';
   }
 
   function trafficCell(server, monthIn, monthOut, online) {
-    if (!online) return '<span class="dim">No traffic</span>';
+    if (!online) return '<span class="dim">' + t('telemetry.no_traffic') + '</span>';
     return '<div class="traffic-cell"><span class="traffic-main">↓ ' + humanBytes(server.network_in) + ' · ↑ ' + humanBytes(server.network_out) + '</span>' +
-      '<span class="traffic-sub">Cycle ↓ ' + humanBytes(monthIn) + ' · ↑ ' + humanBytes(monthOut) + '</span></div>';
+      '<span class="traffic-sub">' + t('traffic.cycle') + ' ↓ ' + humanBytes(monthIn) + ' · ↑ ' + humanBytes(monthOut) + '</span></div>';
   }
 
   function latencyPill(label, time, loss, online) {
@@ -322,7 +584,7 @@
     var cls = loss >= 50 ? ' bad' : loss > 0 ? ' mid' : '';
     var lossText = loss > 0 && loss < 1 ? loss.toFixed(1) : Math.round(loss);
     return '<span class="latency-pill' + cls + '"><span class="latency-label">' + label + '</span>' +
-      '<span class="latency-ms">' + Math.round(time) + 'ms</span><span class="latency-loss">' + lossText + '% loss</span></span>';
+      '<span class="latency-ms">' + Math.round(time) + 'ms</span><span class="latency-loss">' + t('latency.loss', { value: lossText }) + '</span></span>';
   }
 
   function latencyCell(server, online) {
@@ -333,20 +595,20 @@
   }
 
   function classicProtocolLabel(server, online) {
-    if (!online) return 'Offline';
-    if (server.online4 && server.online6) return 'Dual';
+    if (!online) return t('status.offline');
+    if (server.online4 && server.online6) return t('protocol.dual_short');
     return server.online4 ? 'IPv4' : 'IPv6';
   }
 
   function classicMeter(value, online) {
     value = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-    if (!online) return '<div class="classic-meter offline"><span>Offline</span></div>';
+    if (!online) return '<div class="classic-meter offline"><span>' + t('status.offline') + '</span></div>';
     var level = value >= 90 ? ' bad' : value >= 70 ? ' warn' : '';
     return '<div class="classic-meter' + level + '" style="--value:' + value + '"><span>' + value + '%</span></div>';
   }
 
   function classicCarrier(server, online) {
-    if (!online) return '<div class="carrier-cell bad">Offline</div>';
+    if (!online) return '<div class="carrier-cell bad">' + t('status.offline') + '</div>';
     var cu = Math.max(0, Number(server.ping_10010) || 0);
     var ct = Math.max(0, Number(server.ping_189) || 0);
     var cm = Math.max(0, Number(server.ping_10086) || 0);
@@ -365,7 +627,7 @@
     var monthOut = (Number(server.network_out) || 0) - (Number(server.last_network_out) || 0);
     var load = Number(server.load_1) === -1 ? '–' : Math.max(0, Number(server.load_1) || 0).toFixed(2);
     var protocol = classicProtocolLabel(server, online);
-    var monthly = online ? humanBytes(monthIn) + ' | ' + humanBytes(monthOut) : 'Offline';
+    var monthly = online ? humanBytes(monthIn) + ' | ' + humanBytes(monthOut) : t('status.offline');
     var network = online ? humanSpeed(server.network_rx) + ' | ' + humanSpeed(server.network_tx) : '–';
     var total = online ? humanBytes(server.network_in) + ' | ' + humanBytes(server.network_out) : '–';
     return '<tr class="classic-row' + (online ? '' : ' classic-offline') + '">' +
@@ -385,7 +647,7 @@
   }
 
   /* ----------------- render ----------------- */
-  var CELL_LABELS = ['Node', 'Status', 'Uptime', 'Resources', 'Live network', 'Traffic', 'Latency'];
+  var CELL_LABEL_KEYS = ['table.node', 'table.status', 'table.uptime', 'table.resources', 'table.live_network', 'table.traffic', 'table.latency'];
 
   function computeCells(s) {
     var online = serverOnline(s);
@@ -398,7 +660,7 @@
     return { online: online, cells: [
       nodeCell(s, online),
       statusCell(s, online),
-      '<span class="uptime">' + esc(fmtUptime(s.uptime)) + '<small>Load ' + load + '</small></span>',
+      '<span class="uptime">' + esc(fmtUptime(s.uptime)) + '<small>' + t('load.label', { value: load }) + '</small></span>',
       resourceCell(cpuVal, memPct, hddPct, online),
       networkCell(s, online),
       trafficCell(s, mIn, mOut, online),
@@ -409,7 +671,7 @@
   function row(s) {
     var c = computeCells(s);
     var cells = c.cells.map(function (cell, index) {
-      return '<td data-label="' + CELL_LABELS[index] + '">' + cell + '</td>';
+      return '<td data-label="' + esc(t(CELL_LABEL_KEYS[index])) + '">' + cell + '</td>';
     }).join('');
     return '<tr class="row' + (c.online ? '' : ' offline') + '" data-name="' + esc(s.name || '') + '">' + cells + '</tr>';
   }
@@ -435,7 +697,10 @@
       var c = computeCells(s);
       tr.classList.toggle('offline', !c.online);
       var tds = tr.children;
-      for (var t = 0; t < tds.length && t < c.cells.length; t++) tds[t].innerHTML = c.cells[t];
+      for (var tIndex = 0; tIndex < tds.length && tIndex < c.cells.length; tIndex++) {
+        tds[tIndex].setAttribute('data-label', t(CELL_LABEL_KEYS[tIndex]));
+        tds[tIndex].innerHTML = c.cells[tIndex];
+      }
       var ex = tr.nextElementSibling;
       if (ex && ex.classList && ex.classList.contains('exrow')) ex.firstElementChild.innerHTML = detailHTML(s);
     }
@@ -445,9 +710,9 @@
     var visible = filterServers(S.servers, S.filter, S.query);
     var rowsEl = document.getElementById('rows');
     if (!S.servers.length) {
-      rowsEl.innerHTML = '<tr class="empty"><td colspan="7">No nodes configured yet</td></tr>';
+      rowsEl.innerHTML = '<tr class="empty"><td colspan="7">' + t('empty.no_nodes') + '</td></tr>';
     } else if (!visible.length) {
-      rowsEl.innerHTML = '<tr class="empty"><td colspan="7">No nodes match this view</td></tr>';
+      rowsEl.innerHTML = '<tr class="empty"><td colspan="7">' + t('empty.no_match') + '</td></tr>';
     } else if (sameRowSet(visible)) {
       updateRows(visible);
     } else {
@@ -459,10 +724,10 @@
   function renderClassicRows() {
     var rows = document.getElementById('classic-rows');
     if (!S.servers.length) {
-      rows.innerHTML = '<tr class="classic-empty"><td colspan="13">No nodes configured yet</td></tr>';
+      rows.innerHTML = '<tr class="classic-empty"><td colspan="13">' + t('empty.no_nodes') + '</td></tr>';
       return;
     }
-    rows.innerHTML = S.servers.map(classicRow).join('');
+    rows.innerHTML = S.servers.map(function (server) { return classicRow(server); }).join('');
   }
 
   function updateSummary() {
@@ -471,8 +736,8 @@
     document.getElementById('metric-offline').textContent = summary.offline;
     document.getElementById('metric-health').textContent = summary.health + '%';
     document.getElementById('online-caption').textContent = summary.total
-      ? summary.online + ' of ' + summary.total + ' nodes reporting'
-      : 'Waiting for telemetry';
+      ? t('metric.reporting', { online: summary.online, total: summary.total })
+      : t('metric.waiting');
     document.getElementById('filter-all-count').textContent = summary.total;
     document.getElementById('filter-online-count').textContent = summary.online;
     document.getElementById('filter-offline-count').textContent = summary.offline;
@@ -480,7 +745,7 @@
     document.getElementById('classic-total').textContent = summary.total;
 
     document.getElementById('fleet-grid').innerHTML = S.servers.map(function (server) {
-      return '<span class="' + (serverOnline(server) ? 'online' : 'offline') + '" title="' + esc(server.name || 'Node') + '"></span>';
+      return '<span class="' + (serverOnline(server) ? 'online' : 'offline') + '" title="' + esc(server.name || t('table.node')) + '"></span>';
     }).join('');
   }
 
@@ -488,6 +753,7 @@
     S.servers = ((j && j.servers) || []).slice().sort(function (a, b) {
       return String(a && a.name || '').localeCompare(String(b && b.name || ''));
     });
+    S.loaded = true;
     updateSummary();
     renderRows();
     renderClassicRows();
@@ -523,10 +789,10 @@
     var KB = 1024, MB = 1048576;
     var io = humanSpeed(s.io_read) + ' / ' + humanSpeed(s.io_write);
     return '<div class="detail-grid">'
-      + seg('Network down / up', humanSpeed(s.network_rx) + ' / ' + humanSpeed(s.network_tx))
-      + seg('Memory / swap', humanBytes((Number(s.memory_used) || 0) * KB) + ' / ' + humanBytes((Number(s.memory_total) || 0) * KB) + ' · ' + humanBytes((Number(s.swap_used) || 0) * KB) + ' / ' + humanBytes((Number(s.swap_total) || 0) * KB))
-      + seg('Disk / IO', humanBytes((Number(s.hdd_used) || 0) * MB) + ' / ' + humanBytes((Number(s.hdd_total) || 0) * MB) + ' · ' + io)
-      + seg('Sockets / processes', (Number(s.tcp_count) || 0) + ' TCP · ' + (Number(s.udp_count) || 0) + ' UDP · ' + (Number(s.process_count) || 0) + ' proc · ' + (Number(s.thread_count) || 0) + ' threads')
+      + seg(t('detail.network'), humanSpeed(s.network_rx) + ' / ' + humanSpeed(s.network_tx))
+      + seg(t('detail.memory'), humanBytes((Number(s.memory_used) || 0) * KB) + ' / ' + humanBytes((Number(s.memory_total) || 0) * KB) + ' · ' + humanBytes((Number(s.swap_used) || 0) * KB) + ' / ' + humanBytes((Number(s.swap_total) || 0) * KB))
+      + seg(t('detail.disk'), humanBytes((Number(s.hdd_used) || 0) * MB) + ' / ' + humanBytes((Number(s.hdd_total) || 0) * MB) + ' · ' + io)
+      + seg(t('detail.sockets'), t('detail.processes', { tcp: Number(s.tcp_count) || 0, udp: Number(s.udp_count) || 0, processes: Number(s.process_count) || 0, threads: Number(s.thread_count) || 0 }))
       + seg('CU/CT/CM', pingPart(s.time_10010, s.ping_10010) + ' / ' + pingPart(s.time_189, s.ping_189) + ' / ' + pingPart(s.time_10086, s.ping_10086))
       + '</div>';
   }
@@ -570,11 +836,15 @@
       filterServers: filterServers,
       normalizeLayout: normalizeLayout,
       initialLayout: initialLayout,
+      normalizeLanguage: normalizeLanguage,
+      initialLanguage: initialLanguage,
+      translate: translate,
       classicRow: classicRow
     };
   }
 
   if (typeof document !== 'undefined') {
+    initLanguage();
     initLayout();
     initTheme();
     initExpand();
@@ -585,11 +855,8 @@
       timeout: FETCH_TIMEOUT_MS,
       onData: render,
       onState: function (state) {
-        var notice = feedNotice(state, Date.now(), STALE_AFTER_MS);
-        var updated = document.getElementById('updated');
-        updated.textContent = notice.text;
-        document.getElementById('classic-updated').textContent = notice.text;
-        document.getElementById('feed-status').className = 'feed-status ' + notice.kind;
+        S.feedState = state;
+        renderFeedStatus(state);
       }
     }).start();
   }
