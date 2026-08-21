@@ -645,7 +645,7 @@ menu_loop() {
     while true; do
         clear 2>/dev/null
         banner
-        printf '%s\n' "${dim}  详细教程: https://lidalao.com/archives/87${plain}"
+        printf '%s\n' "${dim}  使用教程: https://github.com/Lau0x/ServerStatus#使用指南${plain}"
         list_nodes
         echo
         printf '%s\n' "  ${bold}操作菜单${plain}"
