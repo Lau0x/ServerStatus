@@ -3,70 +3,196 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Server Status</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="css/app.css">
   <script>
-    /* set theme before paint to avoid flash */
     (function () {
       try {
         var t = localStorage.getItem('theme') || 'system';
+        var l = localStorage.getItem('serverstatus-layout') || 'classic';
         var d = t === 'system'
           ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
           : t;
         document.documentElement.dataset.theme = d;
+        document.documentElement.dataset.layout = l === 'classic' ? 'classic' : 'modern';
       } catch (e) {}
     })();
   </script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-dot"></span>
-      <h1>Server&nbsp;Status</h1>
-    </div>
-    <div class="topbar-right">
-      <span id="summary" class="summary"></span>
-      <span id="updated" class="updated"></span>
-      <div class="theme-switch" role="group" aria-label="Theme">
-        <button data-theme-choice="light"  title="Light">☀</button>
-        <button data-theme-choice="dark"   title="Dark">☾</button>
-        <button data-theme-choice="system" title="System">⊙</button>
-      </div>
-    </div>
-  </header>
+  <div class="page-glow page-glow-one"></div>
+  <div class="page-glow page-glow-two"></div>
 
-  <main class="wrap">
-    <div class="table-scroll">
-      <table id="grid">
-        <thead>
-          <tr>
-            <th class="c-name">NAME</th>
-            <th class="c-proto">PROTO</th>
-            <th class="c-month">MONTHLY</th>
-            <th class="c-type">TYPE</th>
-            <th class="c-region">REGION</th>
-            <th class="c-uptime">UPTIME</th>
-            <th class="c-load">LOAD</th>
-            <th class="c-net">NETWORK</th>
-            <th class="c-traffic">TRAFFIC</th>
-            <th class="c-gauge">CPU</th>
-            <th class="c-gauge">RAM</th>
-            <th class="c-gauge">DISK</th>
-            <th class="c-ping">CU</th>
-            <th class="c-ping">CT</th>
-            <th class="c-ping">CM</th>
-          </tr>
-        </thead>
-        <tbody id="rows">
-          <tr class="empty"><td colspan="15">Loading…</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <footer class="foot">
-      Powered by <a href="https://github.com/lidalao/ServerStatus" target="_blank" rel="noopener">ServerStatus</a>
-    </footer>
-  </main>
+  <div class="app-shell">
+    <header class="masthead">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none">
+            <path d="M12 16.5 24 9l12 7.5v15L24 39l-12-7.5v-15Z" stroke="currentColor" stroke-width="2.4"/>
+            <circle cx="24" cy="24" r="4.5" fill="currentColor"/>
+            <path d="M24 19.5V9M28 26.5l8 5M20 26.5l-8 5" stroke="currentColor" stroke-width="2.4"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <span class="eyebrow">Fleet telemetry</span>
+          <h1>Server Status</h1>
+        </span>
+      </div>
+
+      <div class="masthead-actions">
+        <div id="feed-status" class="feed-status loading" aria-live="polite">
+          <span class="feed-light"></span>
+          <span id="updated">Connecting to telemetry…</span>
+        </div>
+        <div class="view-switch" role="group" aria-label="Dashboard layout">
+          <button data-layout-choice="modern" title="Modern dashboard">Modern</button>
+          <button data-layout-choice="classic" title="Classic table">Classic</button>
+        </div>
+        <div class="theme-switch" role="group" aria-label="Color theme">
+          <button data-theme-choice="light" title="Light theme" aria-label="Light theme">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></svg>
+          </button>
+          <button data-theme-choice="dark" title="Dark theme" aria-label="Dark theme">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 15.4A9 9 0 0 1 8.6 3.7 9 9 0 1 0 20.3 15.4Z"/></svg>
+          </button>
+          <button data-theme-choice="system" title="System theme" aria-label="System theme">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="view-mode view-modern">
+        <section class="overview" aria-label="Fleet overview">
+          <article class="metric-card metric-primary">
+            <span class="metric-label">Active nodes</span>
+            <div class="metric-line">
+              <strong id="metric-online">–</strong>
+              <span class="metric-unit">online</span>
+            </div>
+            <span id="online-caption" class="metric-caption">Waiting for telemetry</span>
+          </article>
+
+          <article class="metric-card">
+            <span class="metric-label">Offline nodes</span>
+            <div class="metric-line">
+              <strong id="metric-offline">–</strong>
+              <span class="metric-unit">need attention</span>
+            </div>
+            <span class="metric-caption">Muted below, never hidden</span>
+          </article>
+
+          <article class="metric-card health-card">
+            <span class="metric-label">Fleet health</span>
+            <div class="metric-line">
+              <strong id="metric-health">–</strong>
+              <span class="metric-unit">availability</span>
+            </div>
+            <div id="fleet-grid" class="fleet-grid" aria-label="Node health map"></div>
+          </article>
+
+          <article class="metric-card signal-card">
+            <span class="metric-label">Telemetry</span>
+            <div class="signal-orbit" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <span class="metric-caption">Live polling · 1.5 second cadence</span>
+          </article>
+        </section>
+
+        <section class="fleet-panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Infrastructure</span>
+              <h2>Node overview</h2>
+            </div>
+            <div class="panel-tools">
+              <label class="search-box">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                <input id="node-search" type="search" placeholder="Search node or region" autocomplete="off" aria-label="Search nodes">
+              </label>
+              <div class="filter-group" role="group" aria-label="Filter nodes">
+                <button class="active" data-filter="all">All <span id="filter-all-count">0</span></button>
+                <button data-filter="online">Online <span id="filter-online-count">0</span></button>
+                <button data-filter="offline">Offline <span id="filter-offline-count">0</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-scroll">
+            <table id="grid">
+              <thead>
+                <tr>
+                  <th>Node</th>
+                  <th>Status</th>
+                  <th>Uptime</th>
+                  <th>Resources</th>
+                  <th>Live network</th>
+                  <th>Traffic</th>
+                  <th>Latency</th>
+                </tr>
+              </thead>
+              <tbody id="rows">
+                <tr class="empty"><td colspan="7"><span class="loading-line"></span>Loading fleet telemetry…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="view-mode view-classic" aria-label="Classic server status table">
+        <div class="classic-panel">
+          <div class="classic-head">
+            <div>
+              <span class="classic-kicker">Classic monitor</span>
+              <h2>All servers</h2>
+            </div>
+            <div class="classic-summary">
+              <span><strong id="classic-online">–</strong> online</span>
+              <span class="classic-summary-divider"></span>
+              <span><strong id="classic-total">–</strong> total</span>
+            </div>
+          </div>
+          <div class="classic-scroll">
+            <table id="classic-grid" class="classic-grid">
+              <thead>
+                <tr>
+                  <th>Protocol</th>
+                  <th>Monthly ↓↑</th>
+                  <th>Node</th>
+                  <th>Type</th>
+                  <th>Region</th>
+                  <th>Uptime</th>
+                  <th>Load</th>
+                  <th>Network ↓↑</th>
+                  <th>Total ↓↑</th>
+                  <th>CPU</th>
+                  <th>RAM</th>
+                  <th>Disk</th>
+                  <th>CU · CT · CM</th>
+                </tr>
+              </thead>
+              <tbody id="classic-rows">
+                <tr class="classic-empty"><td colspan="13"><span class="loading-line"></span>Loading fleet telemetry…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="classic-foot">
+            <span id="classic-updated">Connecting to telemetry…</span>
+            <span>Refreshes every 1.5 seconds</span>
+          </div>
+        </div>
+      </section>
+
+      <footer class="foot">
+        <span>Built on ServerStatus</span>
+        <a href="https://github.com/Lau0x/ServerStatus" target="_blank" rel="noopener">View source</a>
+      </footer>
+    </main>
+  </div>
 
   <script src="js/app.js" defer></script>
 </body>
